@@ -20,24 +20,142 @@ def ricker(f0, t, t_lag):
     return source
 
 @jit(parallel=True)
-def Mute(seismogram, shot, rec_x, rec_z, shot_x, shot_z, dt, shift, window = 0.2 ,v0=1500): 
+def Mute(seismogram, shot, rec_x, rec_z, shot_x, shot_z, dt,tlag,shift,window,v0=1500): 
     result = np.zeros_like(seismogram)
     Nt = seismogram.shape[0]
     Nrec = seismogram.shape[1]  
-    dist = np.sqrt((rec_z - shot_z[shot])**2 + (rec_x - shot_x[shot])**2)
-    traveltimes = dist/v0
     for rec in prange(Nrec):
-        t1 = traveltimes[rec] + shift
+        dist = np.sqrt((rec_z[rec] - shot_z[shot])**2 + (rec_x[rec] - shot_x[shot])**2)
+        traveltimes = dist/v0 + tlag + shift
+        t1 = traveltimes
         t2 = t1 + window
         for i in prange(Nt):
-            t = (i-1)*dt
-            if t <=t1:
+            t = i*dt
+            if t <t1:
                 result[i,rec] = 0.0
-            elif t>t1 and t<t2:
-                result[i,rec] = (t-t1)/window*seismogram[i,rec]
+            elif t>=t1 and t<t2:
+                result[i,rec] = (t-t1)/(t2-t1) * seismogram[i,rec]
             elif t>=t2:
                 result[i,rec] = seismogram[i,rec]
+            
     return result
+
+@jit(nopython=True)
+def gaussian_kernel(x, z, sigma):
+    fator = 1. / (2.*np.pi*sigma*sigma)
+    expoente = -(x * x + z * z)/(2.*sigma*sigma)
+    return fator * np.exp(expoente)
+
+@jit(nopython=True, parallel=True)
+def gaussian_filter2D(sigma):
+    kernel_size = int(np.ceil(2.0 * sigma + 1))
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    kernel2d = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+    total = 0.0
+
+    for lin in prange(kernel_size):
+        for col in prange(kernel_size):
+            x = lin - kernel_size // 2
+            y = col - kernel_size // 2
+            val = gaussian_kernel(x, y, sigma)
+            kernel2d[lin, col] = val
+            total += val
+
+    kernel2d /= total
+
+    return kernel2d
+
+@jit(nopython=True, parallel=True)
+def smooth_model(f, sigma, water_mask):
+    s = 1.0 / f
+    s_old = s.copy()
+    kernel = gaussian_filter2D(sigma)
+    ksize = kernel.shape[0]
+    half = ksize // 2
+    nz, nx = np.shape(s)
+
+    for z in prange(half, nz - half):
+        for x in prange(half, nx - half):
+
+            if water_mask[z, x]:
+                continue
+
+            new_value = 0.0
+            total = 0.0
+
+            for i in range(ksize):
+                for j in range(ksize):
+                    zz = z + i - half
+                    xx = x + j - half
+
+                    if water_mask[zz, xx]:
+                        continue
+
+                    new_value += kernel[i, j] * s_old[zz, xx]
+                    total += kernel[i, j]
+
+            if total > 0.0:
+                s[z, x] = new_value / total
+
+    for z in range(half):
+        s[z, :] = s[half, :]
+        s[nz - 1 - z, :] = s[nz - 1 - half, :]
+
+    for x in range(half):
+        s[:, x] = s[:, half]
+        s[:, nx - 1 - x] = s[:, nx - 1 - half]
+
+    for z in range(nz):
+        for x in range(nx):
+            if water_mask[z, x]:
+                s[z, x] = s_old[z, x]
+
+    return 1.0 / s
+
+def low_pass_filter(data, cutoff, dt, transition=0.3, axis=0): 
+    data = np.asarray(data)
+    nt = data.shape[axis]
+
+    # Padding
+    nt_pad = 2 * nt
+
+    if data.ndim == 1:
+        data_pad = np.zeros(nt_pad, dtype=data.dtype)
+        data_pad[:nt] = data
+
+    elif data.ndim == 2:
+        data_pad = np.zeros((nt_pad, data.shape[1]), dtype=data.dtype)
+        data_pad[:nt, :] = data
+
+    fft_data = np.fft.rfft(data_pad, axis=axis)
+    frequencies = np.fft.rfftfreq(nt_pad, d=dt)
+
+    fpass = cutoff 
+    fstop = cutoff * (1.0 + transition)
+
+    mask = np.ones_like(frequencies)
+
+    mask[frequencies >= fstop] = 0.0
+
+    for idx in range(len(frequencies)):
+        if frequencies[idx] > fpass and frequencies[idx] < fstop:
+            mask[idx] = 1.0 - (frequencies[idx] - fpass) / (fstop - fpass)
+
+    if data.ndim == 2:
+        mask = mask[:, np.newaxis]
+
+    data_filt_pad = np.fft.irfft(fft_data * mask, n=nt_pad, axis=axis)
+
+    # Remove o padding
+    if data.ndim == 1:
+        data_filt = data_filt_pad[:nt]
+
+    elif data.ndim == 2:
+        data_filt = data_filt_pad[:nt, :]
+
+    return data_filt.astype(data.dtype)
 
 # CPML Auxiliar Functions
 @njit(inline = "always")
@@ -86,12 +204,10 @@ def vertical_dampening_profiles(N_abc,nz_abc, dz, vp, f_pico, d0, dt, i, j):
 
 @jit(nopython=True, parallel=True)
 def updatePsi(PsixFR, PsixFL, PsizFU, PsizFD, nx_abc, nz_abc, Uc, dx,dz, N_abc, f_pico, d0, dt, vp):
-
     a1 = 4.0 / 5.0
     a2 = -1.0 / 5.0
     a3 = 4.0 / 105.0
     a4 = -1.0 / 280.0
-
 
     for j in prange(4, nz_abc - 4):
         for i in prange(4, N_abc):
@@ -147,19 +263,15 @@ def updatePsi(PsixFR, PsixFL, PsizFU, PsizFD, nx_abc, nz_abc, Uc, dx,dz, N_abc, 
 
 @jit(nopython=True, parallel=True)
 def updateZeta(PsixFR, PsixFL, ZetaxFR, ZetaxFL,PsizFU, PsizFD, ZetazFU, ZetazFD, nx_abc, nz_abc, Uc, dx, dz, N_abc, f_pico, d0, dt, vp):
-
     c0 = -1435.0 / 504.0
     c1 = 8.0 / 5.0
     c2 = -1.0 / 5.0
     c3 = 8.0 / 315.0
     c4 = -1.0 / 560.0
-
     a1 = 4.0 / 5.0
     a2 = -1.0 / 5.0
     a3 = 4.0 / 105.0
     a4 = -1.0 / 280.0
-
-
     for j in prange(4, nz_abc - 4):
         for i in prange(4, N_abc):
             ax, bx = horizontal_dampening_profiles(N_abc,nx_abc, dx, vp, f_pico, d0, dt, i, j)
@@ -251,7 +363,6 @@ def updateWaveEquation(Uf,Uc,vp,nz,nx,dz,dx,dt):
     c2 = -1.0 / 5.0
     c3 = 8.0 / 315.0
     c4 = -1.0 / 560.0
-
     for i in prange(4,nx-4):
         for j in prange(4,nz-4):
             pxx = (c0 * Uc[j, i] + c1 * (Uc[j, i+1] + Uc[j, i-1]) + c2 * (Uc[j, i+2] + Uc[j, i-2]) + c3 * (Uc[j, i+3] + Uc[j, i-3]) +c4 * (Uc[j, i+4] + Uc[j, i-4])) / (dx * dx)
@@ -313,12 +424,10 @@ def updateWaveEquationTTI(Uf, Uc, nx, nz, dt, dx, dz, vp, epsilon, delta, theta)
     c2 = -1.0 / 5.0
     c3 = 8.0 / 315.0
     c4 = -1.0 / 560.0
-
     a1 = 4.0 / 5.0
     a2 = -1.0 / 5.0
     a3 = 4.0 / 105.0
     a4 = -1.0 / 280.0
-
     for i in prange(4,nx-4):
         for j in prange(4,nz-4):
             pxx = (c0 * Uc[j, i] + 
@@ -386,12 +495,10 @@ def updateWaveEquationCPML(Uf, Uc, vp, nx_abc, nz_abc, dz, dx, dt, PsixFR, PsixF
     c2 = -1.0 / 5.0
     c3 = 8.0 / 315.0
     c4 = -1.0 / 560.0
-
     a1 = 4.0 / 5.0
     a2 = -1.0 / 5.0
     a3 = 4.0 / 105.0
     a4 = -1.0 / 280.0
-
 
     # Região Interior 
     for j in prange(N_abc, nz_abc - N_abc):
@@ -571,7 +678,6 @@ def updateWaveEquationVTICPML(Uf, Uc, dt, dx, dz, vp, epsilon, delta,
     a2 = -1.0 / 5.0
     a3 = 4.0 / 105.0
     a4 = -1.0 / 280.0
-
 
     # Região Interior
     for i in prange(N_abc, nx_abc - N_abc):  

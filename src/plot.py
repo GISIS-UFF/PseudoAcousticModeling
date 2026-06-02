@@ -4,88 +4,28 @@ from survey import parameters
 pmt = parameters("../inputs/Parameters.json")
 plt = plotting(pmt)
 
-# plt.viewModel(f"layer2")
-# plt.viewSnapshot(f"../inputs/layer2vp_Nz301_Nx301.bin",f"{pmt.snapshotFolder}{pmt.approximation}_shot_1_Nx{pmt.nx}_Nz{pmt.nz}_Nt{pmt.nt}_frame_2500.bin")
-# plt.movieSnapshot(f"{pmt.approximation}_shot_1_Nx{pmt.nx}_Nz{pmt.nz}_Nt{pmt.nt}_frame_", f"../inputs/layer2vp_Nz301_Nx301.bin", savegif = False)
-plt.viewSeismogram(f"{pmt.seismogramFolder}seismogram_shot_1_Nt{pmt.nt}_Nrec{pmt.Nrec}.bin", perc=95)
+plt.viewModel(f"/home/juanmarques/workspace/SeismicModeling2D/outputs/estimated_models/fwi_vp_acoustic_Nx681_Nz141_itr8_freq10.0.bin")
+plt.viewHistory()
+# plt.viewSnapshot("acousticforward_shot_3_Nx201_Nz201_Nt8001_frame_","../inputs/diffractorvp_Nz201_Nx201.bin")
+# plt.movieSnapshot(f"acousticforward_shot_20_Nx1701_Nz351_Nt8001_frame", f"../inputs/models/vp_marmousi-ii_shape_(2801, 13601)_dh10m_Nz351_Nx1701.bin", savegif = False)
+# plt.viewSeismogram(f"/home/juanmarques/workspace/SeismicModeling2D/outputs/seismograms/seismogram_shot_15_Nt5001_Nrec170.bin", perc=99)
 # plt.viewSeismogramComparison(95,0,"../outputs/seismograms/VTIseismogram_shot_1_Nt20001_Nrec501.bin", "../outputs/seismograms/VTINewseismogram_shot_1_Nt20001_Nrec501.bin")
-# plt.viewMigratedImage(f"{pmt.migratedimageFolder}migrated_image_{pmt.approximation}_Nx{pmt.nx}_Nz{pmt.nz}.bin",laplacian=True,perc=99)
+# plt.viewImage(f"../outputs/images/migrated_image_acoustic_Nx681_Nz141.bin",laplacian=True,perc=99)
 # plt.plotImageTrace(f"{pmt.migratedimageFolder}migrated_image_{pmt.approximation}_Nx{pmt.nx}_Nz{pmt.nz}.bin", f"../inputs/layer2vp_Nz{pmt.nz}_Nx{pmt.nx}.bin", laplacian = True, ix=None, perc=99)
+# plt.movieImage(f"{pmt.approximation}shot_1_Nx{pmt.nx}_Nz{pmt.nz}_frame", f"../inputs/layer2vp_Nz301_Nx301.bin",laplacian = True, interval=200, savegif = False)
 
+import numpy as np
 
-# import matplotlib.pyplot as plt
-# import numpy as np
-# from mpl_toolkits.axes_grid1 import make_axes_locatable
+model_smooth = np.fromfile("/home/juanmarques/workspace/SeismicModeling2D/inputs/models/fwi_vp_smooth_acoustic_Nx681_Nz141.bin", dtype=np.float32).reshape(pmt.nz,pmt.nx)
+model_ref = np.fromfile("/home/juanmarques/workspace/SeismicModeling2D/inputs/models/diffractorvp_Nz141_Nx681.bin", dtype=np.float32).reshape(pmt.nz,pmt.nx)
+model_fwi = np.fromfile("/home/juanmarques/workspace/SeismicModeling2D/outputs/estimated_models/fwi_vp_acoustic_Nx681_Nz141_itr8_freq10.0.bin", dtype=np.float32).reshape(pmt.nz,pmt.nx)
 
-# def adjustColorBar(fig,ax,im):
-#     # Create a divider for the existing axes instance
-#     divider = make_axes_locatable(ax)
-#     # Append an axes to the right of the current axes, with the same height
-#     cax = divider.append_axes("right", size="5%", pad=0.05)
-#     cbar = fig.colorbar(im,cax=cax)
-#     return cbar
-
-# nx = 301
-# nz = 301
-
-# snap = np.fromfile("../outputs/snapshots/acousticcerjan_shot_1_Nx301_Nz301_Nt8001_frame_2400forward.bin", dtype=np.float32).reshape(nz, nx)
-# snapcheck = np.fromfile("../outputs/snapshots/acousticcerjan_shot_1_Nx301_Nz301_Nt8001_frame_2400checkpoint.bin", dtype=np.float32).reshape(nz, nx)
-# snapSB = np.fromfile("../outputs/snapshots/acousticcerjan_shot_1_Nx301_Nz301_Nt8001_frame_2400SB.bin", dtype=np.float32).reshape(nz, nx)
-# snapRBC = np.fromfile("../outputs/snapshots/acousticcerjan_shot_1_Nx301_Nz301_Nt8001_frame_2400RBC.bin", dtype=np.float32).reshape(nz, nx)
-# imgonthefly = np.fromfile("/home/juanmarques/workspace/SeismicModeling2D/outputs/migrated_image/migrated_image_acoustic_Nx301_Nz301onthefly.bin", dtype=np.float32).reshape(nz, nx)
-# img = np.fromfile("../outputs/migrated_image/migrated_image_acoustic_Nx301_Nz301.bin", dtype=np.float32).reshape(nz, nx)
-# diff = imgonthefly - img
-
-# plt.figure()
-# plt.plot(imgonthefly[:, nx//2], label="validação")
-# plt.plot(img[:, nx//2], label="SB")
-# plt.plot(diff[:, nx//2], label="diff")
-# plt.legend()
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(imgonthefly)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("Validação")
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(img)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("SB")
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(diff)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("Diferença")
-
-# plt.show()
-
-# diff = snap - snapRBC
-
-# plt.figure()
-# plt.plot(snap[:, nx//2], label="validação")
-# plt.plot(snapRBC[:, nx//2], label="check")
-# plt.plot(diff[:, nx//2], label="diff")
-# plt.legend()
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(snap)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("Validação")
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(snapRBC)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("check")
-
-# fig, ax = plt.subplots()
-# im = ax.imshow(diff)
-# cbar = adjustColorBar(fig, ax, im)
-# cbar.set_label("Amplitude")
-# ax.set_title("Diferença")
-
-# plt.show()
+import matplotlib.pyplot as plt
+D = np.linspace(0, pmt.nz * pmt.dz, pmt.nz, endpoint = False)
+plt.figure()
+plt.plot(model_ref[:,pmt.nx//2], D,label = "ref")
+plt.plot(model_smooth[:,pmt.nx//2],D,label = "smooth")
+plt.plot(model_fwi[:,pmt.nx//2], D, label = "fwi")
+plt.ylim(D[-1],0)
+plt.legend()
+plt.show()

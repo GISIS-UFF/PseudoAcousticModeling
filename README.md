@@ -15,7 +15,6 @@ project/
 
 ## Requisitos
 - python 3.10.12
-- nvcc 12.0 (optional)
 
 ## Execute o teste padrão
 

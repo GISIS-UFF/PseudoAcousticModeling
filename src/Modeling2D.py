@@ -1,5 +1,4 @@
 import numpy as np
-import os
 import time
 import cupy as cp
 
@@ -28,13 +27,13 @@ class wavefield:
     def createSourceWavelet(self):
         # Create Ricker wavelet
         self.source = ricker(self.pmt.fcut, self.pmt.t, self.pmt.tlag)
-        self.source = self.source * (self.pmt.dt * self.pmt.dt)/(self.pmt.dx*self.pmt.dz)
+        self.source = self.source * 1/(self.pmt.dx*self.pmt.dz) 
         print(f"info: Ricker Source wavelet created: {self.pmt.nt} samples")
         
     def ImportModel(self, filename):
-        data = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nx, self.pmt.nz)
+        data = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
         print(f"info: Imported: {filename}")
-        return data.T
+        return data
         
     def ExpandModel(self, model_data):
         N = self.pmt.N_abc
@@ -53,7 +52,7 @@ class wavefield:
         print(f"info: Model expanded to {nz_abc}x{nx_abc}")
 
         return model_exp
-    
+   
     def initializeWavefields(self):
         # Initialize velocity model and wavefields
         self.vp         = np.zeros([self.pmt.nz,self.pmt.nx],dtype=np.float32)
@@ -77,15 +76,6 @@ class wavefield:
             self.ZetaxFL     = np.zeros([self.pmt.nz_abc, self.pmt.N_abc+4], dtype=np.float32)
             self.ZetazFU     = np.zeros([self.pmt.N_abc+4, self.pmt.nx_abc], dtype=np.float32)
             self.ZetazFD     = np.zeros([self.pmt.N_abc+4, self.pmt.nx_abc], dtype=np.float32)
-        if self.pmt.migration in ["checkpoint", "SB", "RBC", "onthefly"]:
-            self.migrated_image = np.zeros((self.pmt.nz, self.pmt.nx), dtype=np.float32)
-            self.currentbck  = np.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
-            self.futurebck   = np.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
-            if self.pmt.migration == "SB":
-                self.top   = np.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
-                self.bot   = np.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
-                self.left  = np.zeros((self.pmt.nt, self.pmt.nz, 4), dtype=np.float32)
-                self.right = np.zeros((self.pmt.nt, self.pmt.nz, 4), dtype=np.float32)
         if self.pmt.unit == "GPU":
             self.current = cp.asarray(self.current, dtype=cp.float32)
             self.future  = cp.asarray(self.future, dtype=cp.float32)
@@ -104,16 +94,6 @@ class wavefield:
                 self.nsnaps = len(self.snap_times)
                 self.snapshots_gpu = cp.zeros((self.nsnaps, self.pmt.nz, self.pmt.nx), dtype=cp.float32)
                 self.snap_idx = 0
-            if self.pmt.migration in ["checkpoint", "SB", "RBC", "onthefly"]:
-                self.migrated_image = cp.zeros((self.pmt.nz, self.pmt.nx), dtype=np.float32)
-                self.currentbck  = cp.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
-                self.futurebck   = cp.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
-            if self.pmt.migration == "SB":
-                self.top   = cp.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
-                self.bot   = cp.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
-                self.left  = cp.zeros((self.pmt.nt, self.pmt.nz, 4), dtype=np.float32)
-                self.right = cp.zeros((self.pmt.nt, self.pmt.nz, 4), dtype=np.float32)
-
         print(f"info: Wavefields initialized: {self.pmt.nx}x{self.pmt.nz}x{self.pmt.nt}")
     
     def loadModels(self):
@@ -226,7 +206,7 @@ class wavefield:
 
         snapshot = self.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc]
 
-        snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}_shot_{shot+1}_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
+        snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}forward_shot_{shot+1}_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
         snapshot.tofile(snapshotFile)
         print(f"info: Snapshot saved to {snapshotFile}")
     
@@ -242,13 +222,14 @@ class wavefield:
         self.snapshots_gpu[self.snap_idx, :, :] = snapshot
         self.snap_idx += 1
     
-    def save_seismogram(self,shot):        
+    def store_seismogram(self,k,rz,rx):
+        if self.pmt.unit == "CPU":
+            self.seismogram[k, :] = self.current[rz, rx] 
+        else:
+            self.seismogram_gpu[k, :] = self.current[rz, rx]
+
+    def save_seismogram(self,shot):     
         self.seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}.bin"
-        #check if seismogram folder exists, if not create it
-        if not os.path.exists(self.pmt.seismogramFolder):
-            os.makedirs(self.pmt.seismogramFolder)
-            print(f"info: Created folder {self.pmt.seismogramFolder}")
-            
         self.seismogram.tofile(self.seismogramFile)
         print(f"info: Seismogram saved to {self.seismogramFile}")
 
@@ -257,7 +238,7 @@ class wavefield:
             return
         snapshots_cpu = cp.asnumpy(self.snapshots_gpu[:self.snap_idx,:,:])
         for i, k in enumerate(self.snap_times[:self.snap_idx]):
-            snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}_shot_{shot+1}"f"_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
+            snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}forward_shot_{shot+1}"f"_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
             snapshots_cpu[i].tofile(snapshotFile)
             print(f"info: Snapshot saved to {snapshotFile}")
 
@@ -282,29 +263,29 @@ class wavefield:
 
     def forward_step(self, k):
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             self.future = updateWaveEquation(self.future, self.current, self.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
             self.future = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.future, self.A)
             self.current = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.current, self.A)
         elif self.pmt.approximation == "acoustic" and self.pmt.ABC == "CPML":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD = updatePsi(self.PsixFR, self.PsixFL,self.PsizFU, self.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD = updateZeta(self.PsixFR, self.PsixFL, self.ZetaxFR, self.ZetaxFL,self.PsizFU, self.PsizFD, self.ZetazFU, self.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             self.future = updateWaveEquationCPML(self.future, self.current, self.vp_exp, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt, self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD, self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD, self.pmt.N_abc)             
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             self.future= updateWaveEquationVTI(self.future, self.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp)
             # Apply absorbing boundary condition
             self.future = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.future, self.A)
             self.current = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.current, self.A)
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "CPML":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD = updatePsi(self.PsixFR, self.PsixFL,self.PsizFU, self.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD = updateZeta(self.PsixFR, self.PsixFL, self.ZetaxFR, self.ZetaxFL,self.PsizFU, self.PsizFD, self.ZetazFU, self.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             self.future = updateWaveEquationVTICPML(self.future, self.current, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp,self.pmt.nx_abc, self.pmt.nz_abc, self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD, self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD, self.pmt.N_abc)  
         elif self.pmt.approximation == "TTI" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             self.future= updateWaveEquationTTI(self.future, self.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp, self.theta_exp)
             # Apply absorbing boundary condition
             self.future = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.future, self.A)
@@ -314,27 +295,27 @@ class wavefield:
         
     def forward_stepGPU(self, k):
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k]  
             updateWaveEquationGPU(self.future, self.current, self.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
             self.future, self.current = AbsorbingBoundaryGPU(self.future,self.current,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.A)
         elif self.pmt.approximation == "acoustic" and self.pmt.ABC == "CPML":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             updatePsiGPU(self.PsixFR, self.PsixFL,self.PsizFU, self.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             updateZetaGPU(self.PsixFR, self.PsixFL, self.ZetaxFR, self.ZetaxFL,self.PsizFU, self.PsizFD, self.ZetazFU, self.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             updateWaveEquationCPMLGPU(self.future, self.current, self.vp_exp, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt, self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD, self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD, self.pmt.N_abc)             
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             updateWaveEquationVTIGPU(self.future, self.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp)
             # Apply absorbing boundary condition
             self.future, self.current = AbsorbingBoundaryGPU(self.future,self.current,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.A)
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "CPML":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             updatePsiGPU(self.PsixFR, self.PsixFL,self.PsizFU, self.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             updateZetaGPU(self.PsixFR, self.PsixFL, self.ZetaxFR, self.ZetaxFL,self.PsizFU, self.PsizFD, self.ZetazFU, self.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.current, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.f_pico, self.d0, self.pmt.dt, self.vp_exp)
             updateWaveEquationVTICPMLGPU(self.future, self.current, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp,self.pmt.nx_abc, self.pmt.nz_abc, self.PsixFR, self.PsixFL, self.PsizFU, self.PsizFD, self.ZetaxFR, self.ZetaxFL, self.ZetazFU, self.ZetazFD, self.pmt.N_abc)             
         elif self.pmt.approximation == "TTI" and self.pmt.ABC == "cerjan":
-            self.current[self.sz,self.sx] += self.source[k]
+            self.current[self.isz,self.isx] += self.source[k] 
             updateWaveEquationTTIGPU(self.future, self.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.vp_exp, self.epsilon_exp, self.delta_exp,self.theta_exp)
             # Apply absorbing boundary condition
             self.future, self.current = AbsorbingBoundaryGPU(self.future,self.current,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.A)
@@ -355,9 +336,6 @@ class wavefield:
             self.delta_exp = self.ExpandModel(self.delta)
             if self.pmt.approximation == "TTI":
                 self.theta_exp = self.ExpandModel(self.theta)
-        
-        rx = np.int32(self.pmt.rec_x/self.pmt.dx) + self.pmt.N_abc
-        rz = np.int32(self.pmt.rec_z/self.pmt.dz) + self.pmt.N_abc
 
         for shot in range(self.pmt.Nshot):
             print(f"info: Shot {shot+1} of {self.pmt.Nshot}")
@@ -365,16 +343,16 @@ class wavefield:
             self.reset_field()
 
             # convert acquisition geometry coordinates to grid points
-            self.sx = int(self.pmt.shot_x[shot]/self.pmt.dx) + self.pmt.N_abc
-            self.sz = int(self.pmt.shot_z[shot]/self.pmt.dz) + self.pmt.N_abc           
+            self.isx = self.pmt.sx[shot]
+            self.isz = self.pmt.sz[shot]        
             for k in range(self.pmt.nt): 
                 self.forward_step(k)
                 # Register seismogram and snapshot
-                self.seismogram[k, :] = self.current[rz, rx]
+                self.store_seismogram(k,self.pmt.rz,self.pmt.rx)
                 self.save_snapshot(shot, k)       
                 #swap
                 self.current, self.future = self.future, self.current
-                
+                 
             self.save_seismogram(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
         print(f"info: Wave equation solved")
@@ -400,28 +378,34 @@ class wavefield:
                 self.theta_exp = self.ExpandModel(self.theta)
                 self.theta_exp  = cp.asarray(self.theta_exp, dtype=cp.float32)
         
-        rx = np.int32(self.pmt.rec_x/self.pmt.dx) + self.pmt.N_abc
-        rz = np.int32(self.pmt.rec_z/self.pmt.dz) + self.pmt.N_abc
-        rx = cp.asarray(rx)
-        rz = cp.asarray(rz)
+        self.pmt.rx = cp.asarray(self.pmt.rx)
+        self.pmt.rz = cp.asarray(self.pmt.rz)
         for shot in range(self.pmt.Nshot):
             print(f"info: Shot {shot+1} of {self.pmt.Nshot}")
 
             self.reset_field()
 
             # convert acquisition geometry coordinates to grid points
-            self.sx = int(self.pmt.shot_x[shot]/self.pmt.dx) + self.pmt.N_abc
-            self.sz = int(self.pmt.shot_z[shot]/self.pmt.dz) + self.pmt.N_abc           
+            self.isx = self.pmt.sx[shot]
+            self.isz = self.pmt.sz[shot]         
             for k in range(self.pmt.nt): 
                 self.forward_stepGPU(k)
                 # Register seismogram and snapshot
-                self.seismogram_gpu[k, :] = self.current[rz, rx]    
+                self.store_seismogram(k,self.pmt.rz,self.pmt.rx)    
                 self.store_snapshotGPU(k)       
                 #swap
                 self.current, self.future = self.future, self.current
 
-            self.seismogram = cp.asnumpy(self.seismogram_gpu)   
+            self.seismogram = cp.asnumpy(self.seismogram_gpu) 
+
             self.save_seismogram(shot)
             self.save_snapshotGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
         print(f"info: Wave equation solved")
+    def SolveWaveEquation(self):
+        if self.pmt.unit == "CPU":
+            self.solveWaveEquation()
+        elif self.pmt.unit == "GPU":
+            self.solveWaveEquationGPU()
+        else:
+            raise ValueError("Unknown unit. Choose 'CPU' or 'GPU'.")

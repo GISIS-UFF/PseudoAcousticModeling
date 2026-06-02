@@ -63,45 +63,42 @@ class plotting:
     def viewSeismogram(self,filename, perc=99):
         sism = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nt,self.pmt.Nrec) 
         plt.figure(figsize=(5, 5))
-        perc = np.percentile(sism, perc)
+        perc = np.percentile(np.abs(sism), perc)
         plt.imshow(sism, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, self.pmt.Nrec, self.pmt.T, 0])
         plt.colorbar(label='Amplitude')
         plt.title("Seismogram")
         plt.ylabel("Time (s)")
         plt.show()
 
-    def viewModel(self,keyword):
-        for filename in sorted(os.listdir(self.pmt.modelFolder)):
-            if keyword in filename and filename.endswith(".bin"):
-                path = os.path.join(self.pmt.modelFolder, filename)
-                model = np.fromfile(path, dtype=np.float32).reshape(self.pmt.nx,self.pmt.nz).T
-                fig, ax = plt.subplots(figsize=(10, 5))
-                im = ax.imshow(model, aspect='equal', cmap='jet', extent=[0, self.pmt.L, self.pmt.D, 0])
-                ax.plot(self.pmt.rec_x, self.pmt.rec_z, 'bv', markersize=2, label='Receivers')
-                ax.plot(self.pmt.shot_x, self.pmt.shot_z, 'r*', markersize=5, label='Sources')
-                ax.set_xlabel("Distance (m)")
-                ax.set_ylabel("Depth (m)")
-                
-                # nice colorbar
-                name = filename.lower()
-                if "epsilon" in name:
-                    label = "Epsilon"
-                elif "delta" in name:
-                    label = "Delta"
-                elif "vs" in name:
-                    label = "Shear velocity (m/s)"
-                elif "theta" in name:
-                    label = "Tilt angle (°)"
-                elif "vp" in name:
-                    label = "Velocity (m/s)"
-                else:
-                    label = "Amplitude"
+    def viewModel(self,filename):
+        model = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nz,self.pmt.nx)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        im = ax.imshow(model, aspect='equal', cmap='jet', extent=[0, self.pmt.L, self.pmt.D, 0])
+        ax.plot(self.pmt.rec_x, self.pmt.rec_z, 'bv', markersize=2, label='Receivers')
+        ax.plot(self.pmt.shot_x, self.pmt.shot_z, 'r*', markersize=5, label='Sources')
+        ax.set_xlabel("Distance (m)")
+        ax.set_ylabel("Depth (m)")
+        
+        # nice colorbar
+        name = filename.lower()
+        if "epsilon" in name:
+            label = "Epsilon"
+        elif "delta" in name:
+            label = "Delta"
+        elif "vs" in name:
+            label = "Shear velocity (m/s)"
+        elif "theta" in name:
+            label = "Tilt angle (°)"
+        elif "vp" in name:
+            label = "Velocity (m/s)"
+        else:
+            label = "Amplitude"
 
-                cbar = self.adjustColorBar(fig, ax, im)
-                cbar.set_label(label)
+        cbar = self.adjustColorBar(fig, ax, im)
+        cbar.set_label(label)
 
-                plt.tight_layout()
-                plt.show()
+        plt.tight_layout()
+        plt.show()
 
     def get_shot_frame(self,filename):
         name = filename.replace(".bin", "")
@@ -119,9 +116,9 @@ class plotting:
         return shot, frame
 
     def viewSnapshot(self, keyword_snap, path_model):
-        perc = 1e-8
+        perc = 95
 
-        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nx, self.pmt.nz).T
+        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx).T
 
         files = []
         for file in os.listdir(self.pmt.snapshotFolder):
@@ -137,6 +134,7 @@ class plotting:
             path_snap = os.path.join(self.pmt.snapshotFolder, filename)
 
             snapshot = np.fromfile(path_snap, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
+            perc = np.percentile(np.abs(snapshot), perc)
 
             fig, ax = plt.subplots(figsize=(10, 5))
             ax.imshow(model,cmap="jet",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0])
@@ -155,50 +153,133 @@ class plotting:
             plt.show()
 
     def movieSnapshot(self, keyword_snap, path_model, interval=200, savegif = False):
-        perc = 1e-8
+        perc = 98
 
         snap_files = []
         for filename in os.listdir(self.pmt.snapshotFolder):
             if filename.endswith(".bin") and keyword_snap in filename:
                 shot, frame = self.get_shot_frame(filename)
-                snap_files.append((shot, frame, filename))
+                if shot is not None and frame is not None:
+                    snap_files.append((shot, frame, filename))
 
         snap_files.sort(key=lambda x: (x[0], x[1]))
 
-        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nx, self.pmt.nz).T
+        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
 
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(model, cmap="jet", aspect="equal", extent=[0, self.pmt.L, self.pmt.D, 0])
 
-        first_file = snap_files[0][2]
+ 
+        amp = 0.0
+        step = max(1, len(snap_files)//20)  
+        for _, _, filename in snap_files[::step]:
+            snapshot = np.fromfile(os.path.join(self.pmt.snapshotFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
+            amp = max(amp, np.percentile(np.abs(snapshot), perc))
+
+        first_shot, first_frame, first_file = snap_files[0]
         snap0 = np.fromfile(os.path.join(self.pmt.snapshotFolder, first_file),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
 
-        im = ax.imshow(snap0,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-perc,vmax=perc,alpha=0.4)
+        im = ax.imshow(snap0,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-amp,vmax=amp,alpha=0.4)
+
+        title = ax.set_title(f"Shot {first_shot} | Frame {first_frame}")
         ax.set_xlabel("Distance (m)")
         ax.set_ylabel("Depth (m)")
 
         def update(i):
-            filename = snap_files[i][2]
+            shot, frame, filename = snap_files[i]
             snapshot = np.fromfile(os.path.join(self.pmt.snapshotFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-            im.set_data(snapshot)
-            return [im]
 
-        ani = FuncAnimation(fig,update,frames=len(snap_files),interval=interval,blit=True)
+            im.set_data(snapshot)
+            title.set_text(f"Shot {shot} | Frame {frame}")
+            return [im, title]
+
+        ani = FuncAnimation(fig, update, frames=len(snap_files), interval=interval, blit=True)
 
         if savegif == True:
             gif_path = os.path.join(self.pmt.snapshotFolder, "snapshots.gif")
-            ani.save(gif_path, writer="pillow", fps=1000/interval)
+            ani.save(gif_path, writer="pillow", fps=max(1, int(1000/interval)))
+            print(f"info: GIF saved to {gif_path}")
+
+        plt.show()
+        return ani
+
+    def movieImage(self, keyword_img, path_model, laplacian, interval=200, savegif = False):
+        perc = 99
+
+        img_files = []
+        for filename in os.listdir(self.pmt.migratedimageFolder):
+            if filename.endswith(".bin") and keyword_img in filename:
+                shot, frame = self.get_shot_frame(filename)
+                if shot is not None and frame is not None:
+                    img_files.append((shot, frame, filename))
+
+        img_files.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nx, self.pmt.nz).T
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.imshow(model,cmap="jet",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0])
+
+        amp = 0.0
+        step = max(1, len(img_files)//20)
+
+        for _, _, filename in img_files[::step]:
+            image = np.fromfile(os.path.join(self.pmt.migratedimageFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
+
+            if laplacian == True:
+                image = self.laplacian_filter(image)
+
+            amp = max(amp, np.percentile(np.abs(image), perc))
+
+        if amp == 0.0:
+            amp = 1e-30
+
+        first_shot, first_frame, first_file = img_files[0]
+
+        img0 = np.fromfile(os.path.join(self.pmt.migratedimageFolder, first_file),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
+
+        if laplacian == True:
+            img0 = self.laplacian_filter(img0)
+
+        im = ax.imshow(img0,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-amp,vmax=amp,alpha=0.4)
+
+        title = ax.set_title(f"Shot {first_shot} | Frame {first_frame}")
+        ax.set_xlabel("Distance (m)")
+        ax.set_ylabel("Depth (m)")
+
+        def update(i):
+            shot, frame, filename = img_files[i]
+
+            image = np.fromfile(os.path.join(self.pmt.migratedimageFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
+
+            if laplacian == True:
+                image = self.laplacian_filter(image)
+
+            im.set_data(image)
+            title.set_text(f"Shot {shot} | Frame {frame}")
+
+            return [im, title]
+
+        ani = FuncAnimation(fig,update,frames=len(img_files),interval=interval,blit=True)
+
+        if savegif == True:
+            gif_path = os.path.join(self.pmt.migratedimageFolder, "images.gif")
+            ani.save(gif_path, writer="pillow", fps=max(1, int(1000/interval)))
+            print(f"info: GIF saved to {gif_path}")
 
         plt.show()
 
-    def viewMigratedImage(self,filename,laplacian,perc=99):
+        return ani
+
+    def viewImage(self,filename,laplacian,perc=99):
         migrated_image = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
         if laplacian == True:
             migrated_image = self.laplacian_filter(migrated_image)
         perc = np.percentile(migrated_image, perc)
+        plt.figure()
         plt.imshow(migrated_image, cmap='gray', vmin=-perc, vmax=perc, extent=[0, self.pmt.nx*self.pmt.dx, self.pmt.nz*self.pmt.dz, 0])  
         plt.colorbar(label='Amplitude')
-        plt.title("Migrated Image")
+        plt.title("Image")
         plt.xlabel("Distance (m)")
         plt.ylabel("Depth (m)")
         plt.show()
@@ -278,4 +359,27 @@ class plotting:
         cbar = self.adjustColorBar(fig, ax, im)
         cbar.set_label("Amplitude")
 
+        plt.show()
+
+    def viewHistory(self):
+        history = np.loadtxt("../outputs/history.txt")
+        if history.ndim == 1:
+            history = history.reshape(1, -1)
+
+        X_norm = history[:, 0]
+        fmax = history[:, 1]
+
+        plt.figure()
+        freqs = np.unique(fmax)
+        for freq in freqs:
+            idx = fmax == freq
+            x = np.arange(np.sum(idx))
+            y = X_norm[idx]
+            plt.plot(x, y, "o-", label=f"0-{freq:g} Hz")
+
+        plt.xlabel("Iteração dentro da banda")
+        plt.ylabel("X / X0 da banda")
+        plt.title("Função objetivo normalizada por banda")
+        plt.legend()
+        plt.grid()
         plt.show()

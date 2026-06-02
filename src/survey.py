@@ -50,12 +50,14 @@ class parameters:
         # Source delay
         self.tlag = self.parameters["tlag"]
 
-        # Output folders
+        # Folders
         self.seismogramFolder = self.parameters["seismogramFolder"]
         self.migratedimageFolder = self.parameters["migratedimageFolder"]
         self.snapshotFolder = self.parameters["snapshotFolder"]
         self.modelFolder = self.parameters["modelFolder"]
         self.checkpointFolder = self.parameters["checkpointFolder"]
+        self.estimatedmodelsFolder = self.parameters["estimatedmodelsFolder"]
+        self.gradientsFolder = self.parameters["gradientsFolder"]
 
         # Source and receiver files
         self.rec_file = self.parameters["rec_file"]
@@ -77,9 +79,28 @@ class parameters:
         # Synthetic models 
         self.layer2 =  self.parameters['layer2']
         self.layer3 =  self.parameters['layer3']
-        self.gradient =  self.parameters['gradient']
+        self.gradientmodel =  self.parameters['gradientmodel']
         self.diffractor =  self.parameters['diffractor']
         self.modelfromvp =  self.parameters['modelfromvp']
+        self.waterlayer = self.parameters['waterlayer']
+        self.idx_water = self.parameters['idx_water']
+        
+        #migration parameters
+        self.shift = self.parameters['shift']
+        self.window = self.parameters['window']
+        self.v0 = self.parameters['v0']
+        self.sigma = self.parameters['sigma'] 
+        self.dvel = self.parameters['dvel']
+        self.ratio = self.parameters['ratio']
+        self.mirror = self.parameters['mirror']
+        self.reciprocity = self.parameters['reciprocity']
+
+        #FWI parameters
+        self.niter = self.parameters['niter']
+        self.fwi = self.parameters['fwi']
+        self.freqs = self.parameters['freqs']
+        self.vmax = self.parameters['vmax']
+        self.vmin = self.parameters['vmin']
 
     def readAcquisitionGeometry(self):        
         # Read receiver and source coordinates from CSV files
@@ -94,5 +115,23 @@ class parameters:
         self.shot_x = sourceTable['coordx'].to_numpy()
         self.shot_z = sourceTable['coordz'].to_numpy()
 
+        if self.reciprocity == True:
+            self.shot_x, self.shot_z = self.rec_x.copy(), self.rec_z.copy()
+            self.rec_x, self.rec_z = self.shot_x.copy(), self.shot_z.copy()
+
+        self.rx = np.int32(self.rec_x / self.dx) + self.N_abc 
+        self.rz = np.int32(self.rec_z / self.dz) + self.N_abc 
+        self.sx = np.int32(self.shot_x / self.dx) + self.N_abc
+        self.sz = np.int32(self.shot_z / self.dz) + self.N_abc 
+            
+        if self.mirror == True:
+            self.rz = np.int32(self.rec_z/self.dz) + self.N_abc - self.idx_water
+            self.sz = np.int32(self.shot_z/self.dz) + self.N_abc - self.idx_water
+
         self.Nrec = len(self.rec_x)
-        self.Nshot = len(self.shot_x)   
+        self.Nshot = len(self.shot_x) 
+
+
+
+    
+  
