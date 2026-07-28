@@ -74,7 +74,7 @@ class plotting:
         model = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nz,self.pmt.nx)
         fig, ax = plt.subplots(figsize=(10, 5))
         im = ax.imshow(model, aspect='equal', cmap='jet', extent=[0, self.pmt.L, self.pmt.D, 0])
-        ax.plot(self.pmt.rec_x, self.pmt.rec_z, 'bv', markersize=2, label='Receivers')
+        ax.plot(self.pmt.rec_x, self.pmt.rec_z, 'yv', markersize=2, label='Receivers')
         ax.plot(self.pmt.shot_x, self.pmt.shot_z, 'r*', markersize=5, label='Sources')
         ax.set_xlabel("Distance (m)")
         ax.set_ylabel("Depth (m)")
@@ -139,7 +139,7 @@ class plotting:
             fig, ax = plt.subplots(figsize=(10, 5))
             ax.imshow(model,cmap="jet",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0])
 
-            im = ax.imshow(snapshot,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-perc,vmax=perc,alpha=0.4)
+            im = ax.imshow(snapshot,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-perc,vmax=perc)
             ax.plot(self.pmt.rec_x, self.pmt.rec_z, 'bv', markersize=2, label='Receivers')
             ax.plot(self.pmt.shot_x, self.pmt.shot_z, 'r*', markersize=5, label='Sources')
             ax.set_title(f"Shot {shot} | Frame {frame}")
@@ -150,6 +150,9 @@ class plotting:
             cbar.set_label("Amplitude")
 
             plt.tight_layout()
+            png_file = os.path.splitext(path_snap)[0] + ".png"
+
+            plt.savefig(png_file, dpi=300, bbox_inches="tight")
             plt.show()
 
     def movieSnapshot(self, keyword_snap, path_model, interval=200, savegif = False):
@@ -276,9 +279,10 @@ class plotting:
         if laplacian == True:
             migrated_image = self.laplacian_filter(migrated_image)
         perc = np.percentile(migrated_image, perc)
-        plt.figure()
-        plt.imshow(migrated_image, cmap='gray', vmin=-perc, vmax=perc, extent=[0, self.pmt.nx*self.pmt.dx, self.pmt.nz*self.pmt.dz, 0])  
-        plt.colorbar(label='Amplitude')
+        plt.figure(figsize=(10, 5))
+        im = plt.imshow(migrated_image, aspect='equal', cmap='gray', vmin=-perc, vmax=perc, extent=[0, self.pmt.L, self.pmt.D, 0])  
+        cbar = plt.colorbar(im)
+        cbar.set_label('Amplitude')
         plt.title("Image")
         plt.xlabel("Distance (m)")
         plt.ylabel("Depth (m)")

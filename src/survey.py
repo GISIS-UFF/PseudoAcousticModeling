@@ -31,24 +31,24 @@ class parameters:
         # Number of point for absorbing boundary condition
         self.N_abc = self.parameters["N_abc"]
 
+        # Max frequency
+        self.fcut = self.parameters["fcut"]
+
+        # Source delay
+        self.tlag = 2.0*np.sqrt(np.pi)/self.fcut
+
         # Number of points in each direction
         self.nx = int(self.L/self.dx)+1
         self.nz = int(self.D/self.dz)+1
-        self.nt = int(self.T/self.dt)+1
+        self.nt = int((self.T + self.tlag)/self.dt)+1
 
         self.nx_abc = self.nx + 2*self.N_abc
         self.nz_abc = self.nz + 2*self.N_abc
 
         # Define arrays for space and time
-        self.x = np.linspace(0, self.L, self.nx)
-        self.z = np.linspace(0, self.D, self.nz)
-        self.t = np.linspace(0, self.T, self.nt)
-
-        # Max frequency
-        self.fcut = self.parameters["fcut"]
-
-        # Source delay
-        self.tlag = self.parameters["tlag"]
+        self.x = np.arange(self.nx) * self.dx
+        self.z = np.arange(self.nz) * self.dz
+        self.t = np.arange(self.nt) * self.dt
 
         # Folders
         self.seismogramFolder = self.parameters["seismogramFolder"]
@@ -101,6 +101,13 @@ class parameters:
         self.freqs = self.parameters['freqs']
         self.vmax = self.parameters['vmax']
         self.vmin = self.parameters['vmin']
+        self.epsmin = self.parameters['epsmin']
+        self.epsmax = self.parameters['epsmax']
+        self.deltamin = self.parameters['deltamin']
+        self.deltamax = self.parameters['deltamax']
+        self.thetamin = self.parameters['thetamin']
+        self.thetamax = self.parameters['thetamax']
+        self.multiparameter = self.parameters['multiparameter']
 
     def readAcquisitionGeometry(self):        
         # Read receiver and source coordinates from CSV files
@@ -116,8 +123,8 @@ class parameters:
         self.shot_z = sourceTable['coordz'].to_numpy()
 
         if self.reciprocity == True:
-            self.shot_x, self.shot_z = self.rec_x.copy(), self.rec_z.copy()
-            self.rec_x, self.rec_z = self.shot_x.copy(), self.shot_z.copy()
+            self.shot_x, self.rec_x = self.rec_x.copy(), self.shot_x.copy()
+            self.shot_z, self.rec_z = self.rec_z.copy(), self.shot_z.copy()
 
         self.rx = np.int32(self.rec_x / self.dx) + self.N_abc 
         self.rz = np.int32(self.rec_z / self.dz) + self.N_abc 

@@ -26,7 +26,7 @@ class wavefield:
 
     def createSourceWavelet(self):
         # Create Ricker wavelet
-        self.source = ricker(self.pmt.fcut, self.pmt.t, self.pmt.tlag)
+        self.source = ricker(self.pmt.fcut, self.pmt.t, self.pmt.tlag, self.pmt.nt, self.pmt.dt)
         self.source = self.source * 1/(self.pmt.dx*self.pmt.dz) 
         print(f"info: Ricker Source wavelet created: {self.pmt.nt} samples")
         
@@ -126,20 +126,77 @@ class wavefield:
         return d0, f_pico
 
     def compute_skm(self):
-        epsilon_max = np.max(self.epsilon)
-        delta_max = np.max(self.delta)
-        inv_dx = 1.0/self.pmt.dx
-        inv_dz = 1.0/self.pmt.dz
-        num = -2.0*(epsilon_max-delta_max)*(inv_dx*inv_dx)*(inv_dz*inv_dz)
-        den = (1.0 + 2.0*epsilon_max)*(inv_dx*inv_dx*inv_dx*inv_dx) + (inv_dz*inv_dz*inv_dz*inv_dz) + 2.0*(1.0 + delta_max)*(inv_dx*inv_dx)*(inv_dz*inv_dz) 
-        Sk = num / den            
+        inv_dx = 1.0 / self.pmt.dx
+        inv_dz = 1.0 / self.pmt.dz
+
+        inv_dx2 = inv_dx * inv_dx
+        inv_dz2 = inv_dz * inv_dz
+
+        inv_dx4 = inv_dx2 * inv_dx2
+        inv_dz4 = inv_dz2 * inv_dz2
+
+        num = -2.0 * (self.epsilon - self.delta) * inv_dx2 * inv_dz2
+        den = (1.0 + 2.0 * self.epsilon) * inv_dx4 + inv_dz4 + 2.0 * (1.0 + self.delta) * inv_dx2 * inv_dz2
+        Sk = num / den
+
         return Sk
 
-    def stability_sum(self,coeffs):
+    def stability_sum(self, coeffs):
         total = 0.0
         for m, c in enumerate(coeffs, start=1):
             total += c * (1.0 - (-1.0)**m)
+
         return total
+
+    def compute_vqp_VTI(self):
+        angles = np.linspace(0.0, 0.5*np.pi, 181)
+        vqp_min = np.inf
+        vqp_max = 0.0
+        for theta in angles:
+            seno = np.sin(theta)
+            cosseno = np.cos(theta)
+
+            sin2 = seno * seno
+            cos2 = cosseno * cosseno
+
+            sin4 = sin2 * sin2
+            cos4 = cos2 * cos2
+
+            num = -2.0 * (self.epsilon - self.delta) * sin2 * cos2
+            den = (1.0 + 2.0*self.epsilon) * sin4 + cos4 + 2.0 * (1.0 + self.delta) * sin2 * cos2
+            Sk = num / den
+            factor = (1.0 + 2.0*self.epsilon) * sin2 + cos2 + Sk
+            vqp = self.vp * np.sqrt(factor)
+            vqp_min = min(vqp_min, np.min(vqp))
+            vqp_max = max(vqp_max, np.max(vqp))
+
+        return vqp_min, vqp_max
+
+    def compute_vqp_TTI(self):
+        angles = np.linspace(0.0, np.pi, 361)
+        vqp_min = np.inf
+        vqp_max = 0.0
+        for phi in angles:
+            beta = phi - self.theta
+
+            seno = np.sin(beta)
+            cosseno = np.cos(beta)
+
+            sin2 = seno * seno
+            cos2 = cosseno * cosseno
+
+            sin4 = sin2 * sin2
+            cos4 = cos2 * cos2
+
+            num = -2.0 * (self.epsilon - self.delta) * sin2 * cos2
+            den = (1.0 + 2.0*self.epsilon) * sin4 + cos4 + 2.0 * (1.0 + self.delta) * sin2 * cos2
+            Sk = num / den
+            factor = (1.0 + 2.0*self.epsilon) * sin2 + cos2 + Sk
+            vqp = self.vp * np.sqrt(factor)
+            vqp_min = min(vqp_min, np.min(vqp))
+            vqp_max = max(vqp_max, np.max(vqp))
+
+        return vqp_min, vqp_max
 
     def checkDispersionAndStability(self):
         if self.pmt.approximation == "acoustic":
@@ -147,49 +204,59 @@ class wavefield:
             vp_max = np.max(self.vp)
             lambda_min = vp_min / self.pmt.fcut
             dx_lim = lambda_min / 4.28
-            dt_lim = dx_lim / (4 * vp_max)
+            dz_lim = lambda_min / 4.28
+            dt_lim = dx_lim / (4.0 * vp_max)
+
             print(f"info: Dispersion and stability check")
             print(f"info: Minimum velocity: {vp_min:.2f} m/s")
             print(f"info: Maximum velocity: {vp_max:.2f} m/s")
             print(f"info: Maximum frequency: {self.pmt.fcut:.2f} Hz")
             print(f"info: Current dx: {self.pmt.dx:.2f} m")
+            print(f"info: Current dz: {self.pmt.dz:.2f} m")
             print(f"info: Current dt: {self.pmt.dt:.5f} s")
-            print(f"info: Critical dx: {dx_lim:.2f} m")
-            print(f"info: Critical dt: {dt_lim:.5f} s")
-            if self.pmt.dx <= dx_lim and self.pmt.dt <= dt_lim:
+            print(f"info: Critical dx for dispersion: {dx_lim:.2f} m")
+            print(f"info: Critical dz for dispersion: {dz_lim:.2f} m")
+            print(f"info: Critical dt for stability: {dt_lim:.5f} s")
+            if self.pmt.dx <= dx_lim and self.pmt.dz <= dz_lim and self.pmt.dt <= dt_lim:
                 print("info: Dispersion and stability conditions satisfied.")
             else:
                 print("WARNING: Dispersion or stability conditions not satisfied.")
-        
-        elif self.pmt.approximation in ["VTI", "TTI"]:
 
-            vp_max = np.max(self.vp)
-            vp_min = np.min(self.vp)
-            epsilon_min = np.min(self.epsilon)
-            delta_min = np.min(self.delta)
+        elif self.pmt.approximation in ["VTI", "TTI"]:
             epsilon_max = np.max(self.epsilon)
+            delta_max = np.max(self.delta)
             Sk = self.compute_skm()
-            Sk_min = -(epsilon_min - delta_min)/(2+(epsilon_min + delta_min))
-            coeffs_8th = [8.0/5.0, -1.0/5.0, 8.0/315.0,-1.0/560.0]    
-            A = ((1+2*epsilon_max)+Sk)/(self.pmt.dx * self.pmt.dx) + (1.0 + Sk)/(self.pmt.dz * self.pmt.dz)
-            B = 1.41421/np.sqrt(self.stability_sum(coeffs_8th))
-            dt_lim = B / vp_max * np.sqrt(A)
-            dx_lim = dt_lim * vp_min * np.sqrt(self.stability_sum(coeffs_8th)) * np.sqrt(2+2*epsilon_min + 2*Sk_min) / 1.41421
+            coeffs_8th = [8.0/5.0, -1.0/5.0, 8.0/315.0, -1.0/560.0]
+            soma = self.stability_sum(coeffs_8th)
+            A = ((1.0 + 2.0 * self.epsilon) + Sk) / (self.pmt.dx * self.pmt.dx) + (1.0 + Sk) / (self.pmt.dz * self.pmt.dz)
+            dt_lim = np.sqrt(2.0) / (np.sqrt(soma) * np.max(self.vp * np.sqrt(A)))
+            if self.pmt.approximation == "VTI":
+                vp_min, vp_max = self.compute_vqp_VTI()
+            elif self.pmt.approximation == "TTI":
+                vp_min, vp_max = self.compute_vqp_TTI()
+            lambda_min = vp_min / self.pmt.fcut
+            dx_lim = lambda_min / 4.28
+            dz_lim = lambda_min / 4.28
+
             print(f"info: Dispersion and stability check")
-            print(f"info: Minimum velocity: {vp_min:.2f} m/s")
-            print(f"info: Maximum velocity: {vp_max:.2f} m/s")
+            print(f"info: Minimum qP velocity: {vp_min:.2f} m/s")
+            print(f"info: Maximum qP velocity: {vp_max:.2f} m/s")
+            print(f"info: Maximum epsilon: {epsilon_max:.4f}")
+            print(f"info: Maximum delta: {delta_max:.4f}")
             print(f"info: Maximum frequency: {self.pmt.fcut:.2f} Hz")
             print(f"info: Current dx: {self.pmt.dx:.2f} m")
+            print(f"info: Current dz: {self.pmt.dz:.2f} m")
             print(f"info: Current dt: {self.pmt.dt:.5f} s")
-            print(f"info: Critical dx: {dx_lim:.2f} m")
-            print(f"info: Critical dt: {dt_lim:.5f} s")
-            if self.pmt.dx <= dx_lim and self.pmt.dt <= dt_lim:
+            print(f"info: Critical dx for dispersion: {dx_lim:.2f} m")
+            print(f"info: Critical dz for dispersion: {dz_lim:.2f} m")
+            print(f"info: Critical dt for stability: {dt_lim:.5f} s")
+            if self.pmt.dx <= dx_lim and self.pmt.dz <= dz_lim and self.pmt.dt <= dt_lim:
                 print("info: Dispersion and stability conditions satisfied.")
             else:
                 print("WARNING: Dispersion or stability conditions not satisfied.")
     
     def createCerjanVector(self):
-        sb = 6. * self.pmt.N_abc
+        sb = 4. * self.pmt.N_abc
         A = np.ones(self.pmt.N_abc)
         for i in range(self.pmt.N_abc):
                 fb = (self.pmt.N_abc - i) / (1.4142 * sb)
@@ -229,7 +296,7 @@ class wavefield:
             self.seismogram_gpu[k, :] = self.current[rz, rx]
 
     def save_seismogram(self,shot):     
-        self.seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}.bin"
+        self.seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
         self.seismogram.tofile(self.seismogramFile)
         print(f"info: Seismogram saved to {self.seismogramFile}")
 
@@ -402,6 +469,7 @@ class wavefield:
             self.save_snapshotGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
         print(f"info: Wave equation solved")
+        
     def SolveWaveEquation(self):
         if self.pmt.unit == "CPU":
             self.solveWaveEquation()

@@ -7,7 +7,7 @@ void AbsorbingBoundaryCuda(float* Uf , float* Uc, int N_abc, int nz, int nx, flo
     int total_size = nz * nx;
     if (i >= total_size) return;
 
-    // Get 2D coordinates from linear index 'i'
+    // Get 2D coordinates from linear i 'i'
     int iz = i / nx;
     int ix = i % nx;
 
@@ -355,10 +355,8 @@ void updateWaveEquationVTICuda(float* Uf,const float* Uc,const int nx,const int 
         float num = -2.0f*(epsilon[i]-delta[i])*(px*px)*(pz*pz);
         float den = (1.0f + 2.0f*epsilon[i])*(px*px*px*px) + (pz*pz*pz*pz) + 2.0f*(1.0f + delta[i])*(px*px)*(pz*pz);
 
-        if (fabsf(den)<1e-12f){
-            Sd = 0.0f;
-        }
-        else{
+        Sd = 0.0f;
+        if (fabsf(den)>1e-12f){
             Sd = num / den;
         }
         Uf[i] = 2.0f * Uc[i] - Uf[i] + (vp[i] * vp[i]) * (dt * dt) * ((1.0f+ 2.0f*epsilon[i]) + Sd) * pxx + (vp[i] * vp[i]) * (dt * dt) *(1.0f + Sd) * pzz;
@@ -437,25 +435,13 @@ void updateWaveEquationTTICuda(float* Uf,const float* Uc,const int nx,const int 
                     a3 * (Uc[i + 3 * nx] - Uc[i - 3 * nx]) +
                     a4 * (Uc[i + 4 * nx] - Uc[i - 4 * nx])) / dz;
 
-        float norm = sqrtf(px * px + pz * pz);
-        float mx, mz;
-        if (norm > 1e-12f) {
-            mx = px / norm;
-            mz = pz / norm;
-        } else {
-            mx = 0.0f;
-            mz = 0.0f;
-        }
-
         float th = theta[i];
 
-        float num = -2.0f * (epsilon[i] - delta[i]) * ((mx * cosf(th) - mz * sinf(th)) * (mx * cosf(th) - mz * sinf(th))) * ((mx * sinf(th) + mz * cosf(th)) * (mx * sinf(th) + mz * cosf(th)));
-        float den = (1.0f + 2.0f * epsilon[i]) * ((mx * cosf(th) - mz * sinf(th)) * (mx * cosf(th) - mz * sinf(th)) * (mx * cosf(th) - mz * sinf(th)) * (mx * cosf(th) - mz * sinf(th))) + ((mx * sinf(th) + mz * cosf(th)) * (mx * sinf(th) + mz * cosf(th)) *(mx * sinf(th) + mz * cosf(th)) * (mx * sinf(th) + mz * cosf(th))) + 2.0f * (1.0f + delta[i]) * ((mx * cosf(th) - mz * sinf(th)) * (mx * cosf(th) - mz * sinf(th))) * ((mx * sinf(th) + mz * cosf(th)) * (mx * sinf(th) + mz * cosf(th)));
+        float num = -2.0f * (epsilon[i] - delta[i]) * ((px * cosf(th) - pz * sinf(th)) * (px * cosf(th) - pz * sinf(th))) * ((px * sinf(th) + pz * cosf(th)) * (px * sinf(th) + pz * cosf(th)));
+        float den = (1.0f + 2.0f * epsilon[i]) * ((px * cosf(th) - pz * sinf(th)) * (px * cosf(th) - pz * sinf(th)) * (px * cosf(th) - pz * sinf(th)) * (px * cosf(th) - pz * sinf(th))) + ((px * sinf(th) + pz * cosf(th)) * (px * sinf(th) + pz * cosf(th)) *(px * sinf(th) + pz * cosf(th)) * (px * sinf(th) + pz * cosf(th))) + 2.0f * (1.0f + delta[i]) * ((px * cosf(th) - pz * sinf(th)) * (px * cosf(th) - pz * sinf(th))) * ((px * sinf(th) + pz * cosf(th)) * (px * sinf(th) + pz * cosf(th)));
 
-        float Sd;
-        if (fabsf(den) < 1e-12f) {
-            Sd = 0.0f;
-        } else {
+        float Sd = 0.0f;
+        if (fabsf(den) > 1e-12f) {
             Sd = num / den;
         }
 
@@ -1121,7 +1107,7 @@ void updateWaveEquationVTICPMLCuda(float* Uf,const float* Uc,const float* vp,con
         float num = -2.0f*(epsilon[i]-delta[i])*((px + psix)*(px + psix))*((pz + psiz)*(pz + psiz));
         float den = (1.0f + 2.0f*epsilon[i])*((px + psix)*(px + psix)*(px + psix)*(px + psix)) + ((pz + psiz)*(pz + psiz)*(pz + psiz)*(pz + psiz)) + 2.0f*(1.0f + delta[i])*((px + psix)*(px + psix))*((pz + psiz)*(pz + psiz));
 
-        if (fabsf(den)<1e-12f){
+        if (fabs(den) >= 1.0e-12f){
             Sd = 0.0f;
         }
         else{
@@ -1185,3 +1171,546 @@ void updateWaveEquationVTICPMLCuda(float* Uf,const float* Uc,const float* vp,con
 '''
 
 updateWaveEquationVTICPMLKernel = cp.RawKernel(updateWaveEquationVTICPMLCuda, 'updateWaveEquationVTICPMLCuda')
+
+calculateGradientVTICuda = r'''
+extern "C" __global__
+void calculateGradientVTICuda(const float* current,const float* adj,float* epsilon_partial,float* delta_partial,const float dx,const float dz,const int nx,const int nz,const float* epsilon,const float* delta)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    double dSd_deps = 0.0f;
+    double dSd_ddelta = 0.0f;
+    double dP_deps = 0.0f;
+    double dP_ddelta = 0.0f;
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_size = nz * nx;
+
+    if (i >= total_size) return;
+
+    int iz = i/nx;
+    int ix = i%nx;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4) 
+    {
+        double pxx = (c0 * current[i]
+                    + c1 * (current[i + 1] + current[i - 1])
+                    + c2 * (current[i + 2] + current[i - 2])
+                    + c3 * (current[i + 3] + current[i - 3])
+                    + c4 * (current[i + 4] + current[i - 4])) / (dx * dx);
+
+        double pzz = (c0 * current[i]
+                    + c1 * (current[i + nx] + current[i - nx])
+                    + c2 * (current[i + 2*nx] + current[i - 2*nx])
+                    + c3 * (current[i + 3*nx] + current[i - 3*nx])
+                    + c4 * (current[i + 4*nx] + current[i - 4*nx])) / (dz * dz);
+
+        double px = (a1*(current[i+1] - current[i-1]) +
+                    a2*(current[i+2] - current[i-2]) +
+                    a3*(current[i+3] - current[i-3]) +
+                    a4*(current[i+4] - current[i-4])) / dx;
+
+        double pz = (a1 * (current[i + nx] - current[i - nx]) +
+                    a2 * (current[i + 2*nx] - current[i - 2*nx]) +
+                    a3 * (current[i + 3*nx] - current[i - 3*nx]) +
+                    a4 * (current[i + 4*nx] - current[i - 4*nx])) / dz;
+        
+        double num = -2.0f*(epsilon[i]-delta[i])*(px*px)*(pz*pz);
+        double den = (1.0f + 2.0f*epsilon[i])*(px*px*px*px) + (pz*pz*pz*pz) + 2.0f*(1.0f + delta[i])*(px*px)*(pz*pz);
+
+        double dnum_deps = -2.0f*px*px*pz*pz;
+        double dnum_ddelta = 2.0f*px*px*pz*pz;
+        double dden_deps = 2.0f*px*px*px*px;
+        double dden_ddelta = 2.0f*px*px*pz*pz;
+
+        dSd_deps = 0.0f;
+        dSd_ddelta = 0.0f;
+        if (fabs(den) > 1.0e-150){
+            dSd_deps = (dnum_deps*den - num*dden_deps)/(den*den);
+            dSd_ddelta = (dnum_ddelta*den - num*dden_ddelta)/(den*den);
+        }
+
+        dP_deps = ((-2.0f - dSd_deps)*pxx - dSd_deps*pzz);
+        dP_ddelta = (-dSd_ddelta*(pxx + pzz));
+
+        epsilon_partial[i] += adj[i]*dP_deps;
+        delta_partial[i] += adj[i]*dP_ddelta;
+    
+    }
+}
+'''    
+
+calculateGradientVTIKernel = cp.RawKernel(calculateGradientVTICuda,"calculateGradientVTICuda")
+
+calculateGradientTTICuda = r'''
+extern "C" __global__
+void calculateGradientTTICuda(const float* current,const float* adj,float* epsilon_partial,float* delta_partial,float* theta_partial,const float dx,const float dz,const int nx,const int nz,const float* epsilon,const float* delta,const float* theta)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_size = nz * nx;
+
+    if (i >= total_size) return;
+
+    int iz = i / nx;
+    int ix = i % nx;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
+    {
+        double pxx = (c0 * current[i]
+            + c1 * (current[i + 1] + current[i - 1])
+            + c2 * (current[i + 2] + current[i - 2])
+            + c3 * (current[i + 3] + current[i - 3])
+            + c4 * (current[i + 4] + current[i - 4])) / (dx * dx);
+
+        double pzz = (c0 * current[i]
+            + c1 * (current[i + nx] + current[i - nx])
+            + c2 * (current[i + 2 * nx] + current[i - 2 * nx])
+            + c3 * (current[i + 3 * nx] + current[i - 3 * nx])
+            + c4 * (current[i + 4 * nx] + current[i - 4 * nx])) / (dz * dz);
+
+        double pxz = (a1*a1*(current[i + nx + 1] - current[i - nx + 1] + current[i - nx - 1] - current[i + nx - 1])
+        + a1*a2*(current[i + 2*nx + 1] - current[i - 2*nx + 1] + current[i - 2*nx - 1] - current[i + 2*nx - 1])
+        + a1*a3*(current[i + 3*nx + 1] - current[i - 3*nx + 1] + current[i - 3*nx - 1] - current[i + 3*nx - 1])
+        + a1*a4*(current[i + 4*nx + 1] - current[i - 4*nx + 1] + current[i - 4*nx - 1] - current[i + 4*nx - 1])
+
+        + a2*a1*(current[i + nx + 2] - current[i - nx + 2] + current[i - nx - 2] - current[i + nx - 2])
+        + a2*a2*(current[i + 2*nx + 2] - current[i - 2*nx + 2] + current[i - 2*nx - 2] - current[i + 2*nx - 2])
+        + a2*a3*(current[i + 3*nx + 2] - current[i - 3*nx + 2] + current[i - 3*nx - 2] - current[i + 3*nx - 2])
+        + a2*a4*(current[i + 4*nx + 2] - current[i - 4*nx + 2] + current[i - 4*nx - 2] - current[i + 4*nx - 2])
+
+        + a3*a1*(current[i + nx + 3] - current[i - nx + 3] + current[i - nx - 3] - current[i + nx - 3])
+        + a3*a2*(current[i + 2*nx + 3] - current[i - 2*nx + 3] + current[i - 2*nx - 3] - current[i + 2*nx - 3])
+        + a3*a3*(current[i + 3*nx + 3] - current[i - 3*nx + 3] + current[i - 3*nx - 3] - current[i + 3*nx - 3])
+        + a3*a4*(current[i + 4*nx + 3] - current[i - 4*nx + 3] + current[i - 4*nx - 3] - current[i + 4*nx - 3])
+
+        + a4*a1*(current[i + nx + 4] - current[i - nx + 4] + current[i - nx - 4] - current[i + nx - 4])
+        + a4*a2*(current[i + 2*nx + 4] - current[i - 2*nx + 4] + current[i - 2*nx - 4] - current[i + 2*nx - 4])
+        + a4*a3*(current[i + 3*nx + 4] - current[i - 3*nx + 4] + current[i - 3*nx - 4] - current[i + 3*nx - 4])
+        + a4*a4*(current[i + 4*nx + 4] - current[i - 4*nx + 4] + current[i - 4*nx - 4] - current[i + 4*nx - 4])) / (dz * dx);
+
+        double px = (a1 * (current[i + 1] - current[i - 1])
+            + a2 * (current[i + 2] - current[i - 2])
+            + a3 * (current[i + 3] - current[i - 3])
+            + a4 * (current[i + 4] - current[i - 4])) / dx;
+
+        double pz = (a1 * (current[i + nx] - current[i - nx])
+            + a2 * (current[i + 2 * nx] - current[i - 2 * nx])
+            + a3 * (current[i + 3 * nx] - current[i - 3 * nx])
+            + a4 * (current[i + 4 * nx] - current[i - 4 * nx])) / dz;
+
+        double eps = epsilon[i];
+        double del = delta[i];
+        double th  = theta[i];
+
+        double costh = cosf(th);
+        double sinth = sinf(th);
+
+        double h = px * costh - pz * sinth;
+        double q = px * sinth + pz * costh;
+
+        double h2 = h * h;
+        double q2 = q * q;
+
+        double num = -2.0f * (eps - del) * h2 * q2;
+
+        double den = (1.0f + 2.0f * eps) * h2 * h2 + q2 * q2 + 2.0f * (1.0f + del) * h2 * q2;
+
+        double dSd_deps = 0.0f;
+        double dSd_ddelta = 0.0f;
+        double dSd_dtheta = 0.0f;
+
+        if (fabs(den) >= 1.0e-150)
+        {
+            double dnum_deps = -2.0f * h2 * q2;
+            double dnum_ddelta = 2.0f * h2 * q2;
+
+            double dden_deps = 2.0f * h2 * h2;
+            double dden_ddelta = 2.0f * h2 * q2;
+
+            double dnum_dtheta = -2.0f * (eps - del) * (-2.0f * h * q * q * q+ 2.0f * h * h * h * q);
+
+            double dden_dtheta = -4.0f * (1.0f + 2.0f * eps) * h * h * h * q + 4.0f * h * q * q * q + 2.0f * (1.0f + del) * (-2.0f * h * q * q * q+ 2.0f * h * h * h * q);
+
+            dSd_deps = (dnum_deps * den - num * dden_deps) / (den * den);
+
+            dSd_ddelta = (dnum_ddelta * den - num * dden_ddelta) / (den * den);
+
+            dSd_dtheta = (dnum_dtheta * den - num * dden_dtheta) / (den * den);
+        }
+
+        double sin2th = sinf(2.0f * th);
+        double cos2th = cosf(2.0f * th);
+
+        double dA_dtheta = 2.0f * eps * sin2th - dSd_dtheta;
+
+        double dB_dtheta = -2.0f * eps * sin2th - dSd_dtheta;
+
+        double dC_dtheta = 4.0f * eps * cos2th;
+
+        double dP_deps = (-(2.0f * costh * costh + dSd_deps)) * pxx - (2.0f * sinth * sinth + dSd_deps) * pzz + 2.0f * sin2th * pxz;
+
+        double dP_ddelta = -dSd_ddelta * (pxx + pzz);
+
+        double dP_dtheta = dA_dtheta * pxx + dB_dtheta * pzz + dC_dtheta * pxz;
+
+        epsilon_partial[i] += adj[i] * dP_deps;
+        delta_partial[i]   += adj[i] * dP_ddelta;
+        theta_partial[i]   += adj[i] * dP_dtheta;    
+    }
+}
+'''
+calculateGradientTTIKernel = cp.RawKernel(calculateGradientTTICuda,"calculateGradientTTICuda")
+
+
+updateAdjointWaveEquationVTICuda = r'''
+extern "C" __global__
+void calculateAdjointVTIProductsCuda(const float* Uc, const float* P, float* AUc, float* BUc, float* QCxUc, float* QCzUc, const int nx, const int nz, const float dx, const float dz, const float* epsilon, const float* delta)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total_size = nx * nz;
+
+    if (i >= total_size)
+        return;
+
+    const int iz = i / nx;
+    const int ix = i % nx;
+
+    AUc[i]   = 0.0f;
+    BUc[i]   = 0.0f;
+    QCxUc[i] = 0.0f;
+    QCzUc[i] = 0.0f;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4){
+        const float pxx =(c0 * P[i]
+                + c1 * (P[i + 1] + P[i - 1])
+                + c2 * (P[i + 2] + P[i - 2])
+                + c3 * (P[i + 3] + P[i - 3])
+                + c4 * (P[i + 4] + P[i - 4])) / (dx * dx);
+
+        const float pzz =(c0 * P[i]
+                + c1 * (P[i + nx] + P[i - nx])
+                + c2 * (P[i + 2 * nx] + P[i - 2 * nx])
+                + c3 * (P[i + 3 * nx] + P[i - 3 * nx])
+                + c4 * (P[i + 4 * nx] + P[i - 4 * nx])) / (dz * dz);
+
+        const float px =(a1 * (P[i + 1] - P[i - 1])
+                + a2 * (P[i + 2] - P[i - 2])
+                + a3 * (P[i + 3] - P[i - 3])
+                + a4 * (P[i + 4] - P[i - 4])) / dx;
+
+        const float pz =(a1 * (P[i + nx] - P[i - nx])
+                + a2 * (P[i + 2*nx] - P[i - 2*nx])
+                + a3 * (P[i + 3*nx] - P[i - 3*nx])
+                + a4 * (P[i + 4*nx] - P[i - 4*nx])) / dz;
+
+        const float eps  = epsilon[i];
+        const float delt = delta[i];
+
+        const float px2 = px * px;
+        const float pz2 = pz * pz;
+
+        const float px4 = px2 * px2;
+        const float pz4 = pz2 * pz2;
+
+        const float num = -2.0f * (eps - delt) * px2 * pz2;
+
+        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + delt) * px2 * pz2;
+
+        float Sd = 0.0f;
+        float Cx = 0.0f;
+        float Cz = 0.0f;
+
+        if (fabsf(den) > 1.0e-12f)
+        {
+            Sd = num / den;
+
+            const float den2 = den * den;
+
+            const float factor = 4.0f * (eps - delt) * ((1.0f + 2.0f * eps) * px4 - pz4)/ den2;
+
+            Cx = factor * px * pz2;
+            Cz = -factor * px2 * pz;
+        }
+
+        const float A = 1.0f + 2.0f * eps + Sd;
+        const float B = 1.0f + Sd;
+        const float Q = pxx + pzz;
+
+        AUc[i]   = A * Uc[i];
+        BUc[i]   = B * Uc[i];
+        QCxUc[i] = Q * Cx * Uc[i];
+        QCzUc[i] = Q * Cz * Uc[i];
+    }
+}
+
+extern "C" __global__
+void updateAdjointWaveEquationVTICuda(float* Uf, const float* Uc, float* AUc, float* BUc, float* QCxUc, float* QCzUc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* vp)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total_size = nx * nz;
+
+    if (i >= total_size)
+        return;
+
+    const int iz = i / nx;
+    const int ix = i % nx;
+
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
+    {
+        const float dxx_AUc = (c0 * AUc[i]
+                + c1 * (AUc[i + 1] + AUc[i - 1])
+                + c2 * (AUc[i + 2] + AUc[i - 2])
+                + c3 * (AUc[i + 3] + AUc[i - 3])
+                + c4 * (AUc[i + 4] + AUc[i - 4])) / (dx * dx);
+
+        const float dzz_BUc =(c0 * BUc[i]
+                + c1 * (BUc[i + nx] + BUc[i - nx])
+                + c2 * (BUc[i + 2 * nx] + BUc[i - 2 * nx])
+                + c3 * (BUc[i + 3 * nx] + BUc[i - 3 * nx])
+                + c4 * (BUc[i + 4 * nx] + BUc[i - 4 * nx])) / (dz * dz);
+
+
+        const float dx_QCxUc = (a1 * (QCxUc[i + 1] - QCxUc[i - 1])
+                + a2 * (QCxUc[i + 2] - QCxUc[i - 2])
+                + a3 * (QCxUc[i + 3] - QCxUc[i - 3])
+                + a4 * (QCxUc[i + 4] - QCxUc[i - 4])) / dx;
+
+        const float dz_QCzUc =(a1 * (QCzUc[i + nx] - QCzUc[i - nx])
+                + a2 * (QCzUc[i + 2*nx] - QCzUc[i - 2*nx])
+                + a3 * (QCzUc[i + 3*nx] - QCzUc[i - 3*nx])
+                + a4 * (QCzUc[i + 4*nx] - QCzUc[i - 4*nx])) / dz;
+
+        const float spatial_operator = dxx_AUc + dzz_BUc - dx_QCxUc - dz_QCzUc;
+        const float vp2dt2 = vp[i] * vp[i] * dt * dt;
+        Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2dt2 * spatial_operator;
+    }
+}
+'''
+
+calculateAdjointVTIProductsKernel = cp.RawKernel(updateAdjointWaveEquationVTICuda,"calculateAdjointVTIProductsCuda")
+
+updateAdjointWaveEquationVTIKernel = cp.RawKernel(updateAdjointWaveEquationVTICuda,"updateAdjointWaveEquationVTICuda")
+
+updateAdjointWaveEquationTTICuda = r'''
+extern "C" __global__
+void calculateAdjointTTIProductsCuda(const float* Uc, const float* P, float* AUc, float* BUc, float* HUc, float* QCxUc, float* QCzUc, const int nx, const int nz, const float dx, const float dz, const float* epsilon, const float* delta, const float* theta)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    const int total_size = nx * nz;
+
+    if (i >= total_size)
+        return;
+
+    const int iz = i / nx;
+    const int ix = i % nx;
+
+    AUc[i]   = 0.0f;
+    BUc[i]   = 0.0f;
+    HUc[i]   = 0.0f;
+    QCxUc[i] = 0.0f;
+    QCzUc[i] = 0.0f;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
+    {
+        const float pxx =(c0 * P[i]
+                + c1 * (P[i + 1] + P[i - 1])
+                + c2 * (P[i + 2] + P[i - 2])
+                + c3 * (P[i + 3] + P[i - 3])
+                + c4 * (P[i + 4] + P[i - 4])) / (dx * dx);
+
+        const float pzz =(c0 * P[i]
+                + c1 * (P[i + nx] + P[i - nx])
+                + c2 * (P[i + 2 * nx] + P[i - 2 * nx])
+                + c3 * (P[i + 3 * nx] + P[i - 3 * nx])
+                + c4 * (P[i + 4 * nx] + P[i - 4 * nx])) / (dz * dz);
+
+        const float px =(a1 * (P[i + 1] - P[i - 1])
+                + a2 * (P[i + 2] - P[i - 2])
+                + a3 * (P[i + 3] - P[i - 3])
+                + a4 * (P[i + 4] - P[i - 4])) / dx;
+
+        const float pz =(a1 * (P[i + nx] - P[i - nx])
+                + a2 * (P[i + 2*nx] - P[i - 2*nx])
+                + a3 * (P[i + 3*nx] - P[i - 3*nx])
+                + a4 * (P[i + 4*nx] - P[i - 4*nx])) / dz;
+
+        const float eps  = epsilon[i];
+        const float delt = delta[i];
+
+        const float xi = px * cosf(theta[i]) - pz * sinf(theta[i]);
+        const float eta = px * sinf(theta[i]) + pz * cosf(theta[i]);
+
+        const float xi2  = xi * xi;
+        const float eta2 = eta * eta;
+
+        const float xi4  = xi2 * xi2;
+        const float eta4 = eta2 * eta2;
+
+        const float num = -2.0f * (eps - delt) * xi2* eta2;
+        const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + delt) * xi2 * eta2;
+
+        float Sd = 0.0f;
+        float Cx = 0.0f;
+        float Cz = 0.0f;
+
+        if (fabsf(den) > 1.0e-12f)
+        {
+            Sd = num / den;
+            const float den2 = den * den;
+            const float K = (1.0f + 2.0f * eps) * xi4 - eta4;
+            const float factor = 4.0f * (eps - delt) * xi * eta * K / den2;
+
+            Cx = factor * pz;
+            Cz = -factor * px;
+        }
+
+        const float cos2 = cosf(theta[i]) * cosf(theta[i]);
+        const float sin2 = sinf(theta[i]) * sinf(theta[i]);
+
+        const float A = (1.0f + 2.0f * eps) * cos2 + sin2 + Sd;
+        const float B = (1.0f + 2.0f * eps) * sin2 + cos2 + Sd;
+        const float H = 2.0f * eps * sinf(2.0f * theta[i]);
+        const float Q = pxx + pzz;
+
+        AUc[i]   = A * Uc[i];
+        BUc[i]   = B * Uc[i];
+        HUc[i]   = H * Uc[i];
+        QCxUc[i] = Q * Cx * Uc[i];
+        QCzUc[i] = Q * Cz * Uc[i];
+    }
+}    
+
+extern "C" __global__
+void updateAdjointWaveEquationTTICuda(float* Uf, const float* Uc, const float* AUc, const float* BUc, const float* HUc, const float* QCxUc, const float* QCzUc, const int nx, const int nz, const float dt, const float dx, const float dz, const float* vp)
+{
+    const float c0 = -1435.0f / 504.0f;
+    const float c1 =  8.0f / 5.0f;
+    const float c2 = -1.0f / 5.0f;
+    const float c3 =  8.0f / 315.0f;
+    const float c4 = -1.0f / 560.0f;
+
+    const float a1 =  4.0f / 5.0f;
+    const float a2 = -1.0f / 5.0f;
+    const float a3 =  4.0f / 105.0f;
+    const float a4 = -1.0f / 280.0f;
+
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    const int total_size = nx * nz;
+
+    if (i >= total_size)
+        return;
+
+    const int iz = i / nx;
+    const int ix = i % nx;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
+    {
+        const float dxx_AUc = (c0 * AUc[i]
+                + c1 * (AUc[i + 1] + AUc[i - 1])
+                + c2 * (AUc[i + 2] + AUc[i - 2])
+                + c3 * (AUc[i + 3] + AUc[i - 3])
+                + c4 * (AUc[i + 4] + AUc[i - 4])) / (dx * dx);
+
+        const float dzz_BUc =(c0 * BUc[i]
+                + c1 * (BUc[i + nx] + BUc[i - nx])
+                + c2 * (BUc[i + 2 * nx] + BUc[i - 2 * nx])
+                + c3 * (BUc[i + 3 * nx] + BUc[i - 3 * nx])
+                + c4 * (BUc[i + 4 * nx] + BUc[i - 4 * nx])) / (dz * dz);
+    
+        const float dxz_HUc = (
+                a1*a1*(HUc[i + nx + 1]     - HUc[i - nx + 1]     + HUc[i - nx - 1]     - HUc[i + nx - 1]) +
+                a1*a2*(HUc[i + 2*nx + 1]   - HUc[i - 2*nx + 1]   + HUc[i - 2*nx - 1]   - HUc[i + 2*nx - 1]) +
+                a1*a3*(HUc[i + 3*nx + 1]   - HUc[i - 3*nx + 1]   + HUc[i - 3*nx - 1]   - HUc[i + 3*nx - 1]) +
+                a1*a4*(HUc[i + 4*nx + 1]   - HUc[i - 4*nx + 1]   + HUc[i - 4*nx - 1]   - HUc[i + 4*nx - 1]) +
+
+                a2*a1*(HUc[i + nx + 2]     - HUc[i - nx + 2]     + HUc[i - nx - 2]     - HUc[i + nx - 2]) +
+                a2*a2*(HUc[i + 2*nx + 2]   - HUc[i - 2*nx + 2]   + HUc[i - 2*nx - 2]   - HUc[i + 2*nx - 2]) +
+                a2*a3*(HUc[i + 3*nx + 2]   - HUc[i - 3*nx + 2]   + HUc[i - 3*nx - 2]   - HUc[i + 3*nx - 2]) +
+                a2*a4*(HUc[i + 4*nx + 2]   - HUc[i - 4*nx + 2]   + HUc[i - 4*nx - 2]   - HUc[i + 4*nx - 2]) +
+
+                a3*a1*(HUc[i + nx + 3]     - HUc[i - nx + 3]     + HUc[i - nx - 3]     - HUc[i + nx - 3]) +
+                a3*a2*(HUc[i + 2*nx + 3]   - HUc[i - 2*nx + 3]   + HUc[i - 2*nx - 3]   - HUc[i + 2*nx - 3]) +
+                a3*a3*(HUc[i + 3*nx + 3]   - HUc[i - 3*nx + 3]   + HUc[i - 3*nx - 3]   - HUc[i + 3*nx - 3]) +
+                a3*a4*(HUc[i + 4*nx + 3]   - HUc[i - 4*nx + 3]   + HUc[i - 4*nx - 3]   - HUc[i + 4*nx - 3]) +
+
+                a4*a1*(HUc[i + nx + 4]     - HUc[i - nx + 4]     + HUc[i - nx - 4]     - HUc[i + nx - 4]) +
+                a4*a2*(HUc[i + 2*nx + 4]   - HUc[i - 2*nx + 4]   + HUc[i - 2*nx - 4]   - HUc[i + 2*nx - 4]) +
+                a4*a3*(HUc[i + 3*nx + 4]   - HUc[i - 3*nx + 4]   + HUc[i - 3*nx - 4]   - HUc[i + 3*nx - 4]) +
+                a4*a4*(HUc[i + 4*nx + 4]   - HUc[i - 4*nx + 4]   + HUc[i - 4*nx - 4]   - HUc[i + 4*nx - 4])) / (dz * dx);
+
+        const float dx_QCxUc = (a1 * (QCxUc[i + 1] - QCxUc[i - 1])
+                + a2 * (QCxUc[i + 2] - QCxUc[i - 2])
+                + a3 * (QCxUc[i + 3] - QCxUc[i - 3])
+                + a4 * (QCxUc[i + 4] - QCxUc[i - 4])) / dx;
+
+
+        const float dz_QCzUc =(a1 * (QCzUc[i + nx] - QCzUc[i - nx])
+                + a2 * (QCzUc[i + 2*nx] - QCzUc[i - 2*nx])
+                + a3 * (QCzUc[i + 3*nx] - QCzUc[i - 3*nx])
+                + a4 * (QCzUc[i + 4*nx] - QCzUc[i - 4*nx])) / dz;
+
+        const float spatial_operator = dxx_AUc + dzz_BUc - dxz_HUc - dx_QCxUc - dz_QCzUc;
+        const float vp2dt2 = vp[i] * vp[i] * dt * dt;
+
+        Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2dt2 * spatial_operator;
+    }
+}
+'''
+
+calculateAdjointTTIProductsKernel = cp.RawKernel(updateAdjointWaveEquationTTICuda,"calculateAdjointTTIProductsCuda")
+
+updateAdjointWaveEquationTTIKernel = cp.RawKernel(updateAdjointWaveEquationTTICuda,"updateAdjointWaveEquationTTICuda")
