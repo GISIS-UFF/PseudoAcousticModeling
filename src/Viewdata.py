@@ -155,119 +155,54 @@ class plotting:
             plt.savefig(png_file, dpi=300, bbox_inches="tight")
             plt.show()
 
-    def movieSnapshot(self, keyword_snap, path_model, interval=200, savegif = False):
+    def movieSnapshot(self,keyword_snap,path_model,backward=False,interval=200,savegif=False):
         perc = 98
-
         snap_files = []
+
         for filename in os.listdir(self.pmt.snapshotFolder):
             if filename.endswith(".bin") and keyword_snap in filename:
                 shot, frame = self.get_shot_frame(filename)
                 if shot is not None and frame is not None:
                     snap_files.append((shot, frame, filename))
 
-        snap_files.sort(key=lambda x: (x[0], x[1]))
+        if backward:
+            snap_files.sort(key=lambda x: (x[0], -x[1]))
+            propagation_name = "Backward"
+        else:
+            snap_files.sort(key=lambda x: (x[0], x[1]))
+            propagation_name = "Forward"
 
-        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
+        model = np.fromfile(path_model,dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.imshow(model, cmap="jet", aspect="equal", extent=[0, self.pmt.L, self.pmt.D, 0])
+        ax.imshow(model,cmap="jet",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0])
 
- 
         amp = 0.0
-        step = max(1, len(snap_files)//20)  
-        for _, _, filename in snap_files[::step]:
+        sample_step = max(1, len(snap_files) // 20)
+
+        for _, _, filename in snap_files[::sample_step]:
             snapshot = np.fromfile(os.path.join(self.pmt.snapshotFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-            amp = max(amp, np.percentile(np.abs(snapshot), perc))
+            amp = max(amp,np.percentile(np.abs(snapshot), perc))
 
         first_shot, first_frame, first_file = snap_files[0]
+
         snap0 = np.fromfile(os.path.join(self.pmt.snapshotFolder, first_file),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
         im = ax.imshow(snap0,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-amp,vmax=amp,alpha=0.4)
-
-        title = ax.set_title(f"Shot {first_shot} | Frame {first_frame}")
+        title = ax.set_title(f"{propagation_name} | "f"Shot {first_shot} | "f"Frame {first_frame} | "f"Time {first_frame * self.pmt.dt:.4f} s")
         ax.set_xlabel("Distance (m)")
         ax.set_ylabel("Depth (m)")
 
         def update(i):
             shot, frame, filename = snap_files[i]
             snapshot = np.fromfile(os.path.join(self.pmt.snapshotFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
             im.set_data(snapshot)
-            title.set_text(f"Shot {shot} | Frame {frame}")
-            return [im, title]
+            title.set_text(f"{propagation_name} | "f"Shot {shot} | "f"Frame {frame} | "f"Time {frame * self.pmt.dt:.4f} s")
+            return im, title
 
-        ani = FuncAnimation(fig, update, frames=len(snap_files), interval=interval, blit=True)
-
-        if savegif == True:
-            gif_path = os.path.join(self.pmt.snapshotFolder, "snapshots.gif")
-            ani.save(gif_path, writer="pillow", fps=max(1, int(1000/interval)))
-            print(f"info: GIF saved to {gif_path}")
-
-        plt.show()
-        return ani
-
-    def movieImage(self, keyword_img, path_model, laplacian, interval=200, savegif = False):
-        perc = 99
-
-        img_files = []
-        for filename in os.listdir(self.pmt.migratedimageFolder):
-            if filename.endswith(".bin") and keyword_img in filename:
-                shot, frame = self.get_shot_frame(filename)
-                if shot is not None and frame is not None:
-                    img_files.append((shot, frame, filename))
-
-        img_files.sort(key=lambda x: (x[0], x[1]), reverse=True)
-
-        model = np.fromfile(path_model, dtype=np.float32).reshape(self.pmt.nx, self.pmt.nz).T
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.imshow(model,cmap="jet",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0])
-
-        amp = 0.0
-        step = max(1, len(img_files)//20)
-
-        for _, _, filename in img_files[::step]:
-            image = np.fromfile(os.path.join(self.pmt.migratedimageFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
-            if laplacian == True:
-                image = self.laplacian_filter(image)
-
-            amp = max(amp, np.percentile(np.abs(image), perc))
-
-        if amp == 0.0:
-            amp = 1e-30
-
-        first_shot, first_frame, first_file = img_files[0]
-
-        img0 = np.fromfile(os.path.join(self.pmt.migratedimageFolder, first_file),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
-        if laplacian == True:
-            img0 = self.laplacian_filter(img0)
-
-        im = ax.imshow(img0,cmap="gray",aspect="equal",extent=[0, self.pmt.L, self.pmt.D, 0],vmin=-amp,vmax=amp,alpha=0.4)
-
-        title = ax.set_title(f"Shot {first_shot} | Frame {first_frame}")
-        ax.set_xlabel("Distance (m)")
-        ax.set_ylabel("Depth (m)")
-
-        def update(i):
-            shot, frame, filename = img_files[i]
-
-            image = np.fromfile(os.path.join(self.pmt.migratedimageFolder, filename),dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-
-            if laplacian == True:
-                image = self.laplacian_filter(image)
-
-            im.set_data(image)
-            title.set_text(f"Shot {shot} | Frame {frame}")
-
-            return [im, title]
-
-        ani = FuncAnimation(fig,update,frames=len(img_files),interval=interval,blit=True)
-
-        if savegif == True:
-            gif_path = os.path.join(self.pmt.migratedimageFolder, "images.gif")
-            ani.save(gif_path, writer="pillow", fps=max(1, int(1000/interval)))
+        ani = FuncAnimation(fig,update,frames=len(snap_files),interval=interval,blit=True)
+        if savegif:
+            direction = "backward" if backward else "forward"
+            gif_path = os.path.join(self.pmt.snapshotFolder,f"snapshots_{direction}.gif")
+            ani.save(gif_path,writer="pillow",fps=max(1, int(1000 / interval)))
             print(f"info: GIF saved to {gif_path}")
 
         plt.show()

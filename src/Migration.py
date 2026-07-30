@@ -79,9 +79,7 @@ class migration:
             if self.pmt.snap == True:
                 self.snapshots_gpubck = cp.zeros((self.wf.nsnaps, self.pmt.nz, self.pmt.nx), dtype=cp.float32)
                 self.snap_idxbck = 0
-                self.img_times = list(range(0, self.pmt.last_save + 1, self.pmt.step))
-                self.nimg = len(self.wf.snap_times)
-                self.img_gpu = cp.zeros((self.wf.nsnaps, self.pmt.nz, self.pmt.nx), dtype=cp.float32)
+                self.snap_times_bck = []
             if self.pmt.migration == "SB":
                 self.top   = cp.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
                 self.bot   = cp.zeros((self.pmt.nt, 4, self.pmt.nx), dtype=np.float32)
@@ -133,52 +131,18 @@ class migration:
        
         snapshot = self.currentbck[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc]
         self.snapshots_gpubck[self.snap_idxbck, :, :] = snapshot
+        self.snap_times_bck.append(k)
         self.snap_idxbck += 1
 
-    def save_snapshotBCKGPU(self,shot):        
+    def save_snapshotBCKGPU(self, shot):
         if not self.pmt.snap:
             return
-        self.snap_times_reversed = self.wf.snap_times[::-1]
-        snapshots_cpu = cp.asnumpy(self.snapshots_gpubck[:self.snap_idxbck,:,:])
-        for i, k in enumerate(self.snap_times_reversed[:self.snap_idxbck]):
-            snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}backward_shot_{shot+1}"f"_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
-            snapshots_cpu[i].tofile(snapshotFile)
-            print(f"info: Snapshot saved to {snapshotFile}")
 
-    def save_image(self,shot, k):        
-        if not self.pmt.snap:
-            return
-        if k > self.pmt.last_save:
-            return
-        if k % self.pmt.step != 0:
-            return
-
-        img = self.migrated_partial
-
-        imageFile = (f"{self.pmt.migratedimageFolder}{self.pmt.approximation}_shot_{shot+1}_Nx{self.pmt.nx}_Nz{self.pmt.nz}_frame_{k}.bin")
-        img.tofile(imageFile)
-        print(f"info: Image saved to {imageFile}")
-
-    def store_imageGPU(self, k):        
-        if not self.pmt.snap:
-            return
-        if k > self.pmt.last_save:
-            return
-        if k % self.pmt.step != 0:
-            return
-       
-        img = self.migrated_partial
-        self.img_gpu[self.wf.img_idx, :, :] = img
-        self.wf.img_idx += 1
-
-    def save_imageGPU(self,shot):        
-        if not self.pmt.snap:
-            return
-        img_cpu = cp.asnumpy(self.img_gpu[:self.wf.img_idx,:,:])
-        for i, k in enumerate(self.img_times[:self.wf.img_idx]):
-            imageFile = (f"{self.pmt.migratedimageFolder}{self.pmt.approximation}_shot_{shot+1}"f"_Nx{self.pmt.nx}_Nz{self.pmt.nz}_frame_{k}.bin")
-            img_cpu[i].tofile(imageFile)
-            print(f"info: Image saved to {imageFile}")
+        snapshots_cpu = cp.asnumpy(self.snapshots_gpubck[:self.snap_idxbck])
+        for snapshot, k in zip(snapshots_cpu,self.snap_times_bck):
+            snapshotFile = (f"{self.pmt.snapshotFolder}{self.pmt.approximation}backward_shot_{shot + 1}_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
+            snapshot.astype(np.float32).tofile(snapshotFile)
+            print(f"info: Backward snapshot saved to {snapshotFile}")
                
     def load_checkpoint(self, shot, k):
         checkpointFile = (f"{self.pmt.checkpointFolder}{self.pmt.approximation}{self.pmt.ABC}_Nx{self.pmt.nx}_Nz{self.pmt.nz}_Nt{self.pmt.nt}_frame_{k}.bin")
@@ -363,12 +327,9 @@ class migration:
             self.wf.ZetazFD.fill(0)
         if self.pmt.unit == "GPU":
             if self.pmt.snap == True:
-                self.wf.snapshots_gpu.fill(0)
                 self.snapshots_gpubck.fill(0)
-                self.wf.snap_idx = 0
                 self.snap_idxbck = 0
-                self.img_gpu.fill(0)
-                self.wf.img_idx = 0
+                self.snap_times_bck = []
 
     def get_randomvalue(self,velocity, func, par):
         point = np.random.normal(velocity, par*func)    
@@ -560,7 +521,6 @@ class migration:
                     self.theta_partial = np.zeros_like(self.migrated_image)
             for k in range(self.pmt.nt):
                 self.wf.forward_step(k)
-                self.wf.save_snapshot(shot, k)
                 if self.pmt.approximation == "acoustic":
                     save_field[k,:,:] = self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc].copy()
                     self.ilum_partial += save_field[k,:,:] * save_field[k,:,:]
@@ -594,7 +554,6 @@ class migration:
                         self.migrated_partial += (save_field[t,:,:] * adj)
                     else:
                         self.migrated_partial += (save_field[t,self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.save_image(shot,t)
                 #swap
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
 
@@ -684,7 +643,6 @@ class migration:
             self.build_ckpts_steps()
             for k in range(self.pmt.nt):
                 self.wf.forward_step(k)
-                self.wf.save_snapshot(shot, k)
                 self.save_checkpoint(shot, k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
@@ -720,7 +678,7 @@ class migration:
                                 self.epsilon_partial, self.delta_partial, self.theta_partial = calculateGradientTTI(u_curr, adj, self.epsilon_partial, self.delta_partial, self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta, self.theta)
                     else:
                         self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                    self.save_image(shot,t)
+
                     #swap
                     self.wf.current, self.wf.future = self.wf.future, self.wf.current
                     self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -811,7 +769,6 @@ class migration:
             for k in range(self.pmt.nt):
                 self.wf.forward_step(k)
                 self.save_boundaries(k)
-                self.wf.save_snapshot(shot, k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
             for t in range(self.pmt.nt - 1, 0, -1):
@@ -845,7 +802,6 @@ class migration:
                             self.epsilon_partial, self.delta_partial, self.theta_partial = calculateGradientTTI(u_curr, adj, self.epsilon_partial, self.delta_partial, self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta,self.theta)
                 else:
                     self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.save_image(shot,t)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -938,7 +894,6 @@ class migration:
                     self.theta_partial = np.zeros_like(self.migrated_image)
             for k in range(self.pmt.nt):
                 self.forward_step_RBC(k)
-                self.wf.save_snapshot(shot, k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
             self.wf.current, self.wf.future = self.wf.future, self.wf.current    
@@ -972,7 +927,6 @@ class migration:
                             self.epsilon_partial, self.delta_partial, self.theta_partial = calculateGradientTTI(u_curr, adj, self.epsilon_partial, self.delta_partial, self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta, self.theta)
                 else:
                     self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.save_image(shot,t)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -1082,7 +1036,6 @@ class migration:
                     self.theta_partial = cp.zeros_like(self.migrated_image)
             for k in range(self.pmt.nt):
                 self.wf.forward_stepGPU(k)
-                self.wf.store_snapshotGPU(k)
                 if self.pmt.approximation == "acoustic":
                     save_field[k, :, :] = self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc]
                     self.ilum_partial += (save_field[k,:,:] * save_field[k,:,:])
@@ -1123,7 +1076,6 @@ class migration:
                         self.migrated_partial += (save_field[t,:,:] * adj)
                     else:
                         self.migrated_partial += (save_field[t,self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.store_imageGPU(t)
                 #swap
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
 
@@ -1135,9 +1087,7 @@ class migration:
                     self.delta_grad += self.delta_partial
                 if self.pmt.approximation == "TTI":
                     self.theta_grad += self.theta_partial
-            self.wf.save_snapshotGPU(shot)
             self.save_snapshotBCKGPU(shot)
-            self.save_imageGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
         self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
@@ -1235,7 +1185,6 @@ class migration:
             self.build_ckpts_steps()
             for k in range(self.pmt.nt):
                 self.wf.forward_stepGPU(k)
-                self.wf.store_snapshotGPU(k)
                 self.save_checkpointGPU(shot, k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
@@ -1277,7 +1226,7 @@ class migration:
                                 calculateGradientTTICuda(u_curr, adj, self.epsilon_partial, self.delta_partial, self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta,self.theta)  
                     else:
                         self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                    self.store_imageGPU(t)
+
                     #swap
                     self.wf.current, self.wf.future = self.wf.future, self.wf.current
                     self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -1290,9 +1239,7 @@ class migration:
                 if self.pmt.approximation == "TTI":
                     self.theta_grad += self.theta_partial
             self.ilum += self.ilum_partial
-            self.wf.save_snapshotGPU(shot)
             self.save_snapshotBCKGPU(shot)
-            self.save_imageGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
         self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
@@ -1390,7 +1337,6 @@ class migration:
             for k in range(self.pmt.nt):
                 self.wf.forward_stepGPU(k)
                 self.save_boundaries(k)
-                self.wf.store_snapshotGPU(k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
             for t in range(self.pmt.nt - 1, 0, -1):
@@ -1429,7 +1375,6 @@ class migration:
                             calculateGradientTTICuda(u_curr, adj, self.epsilon_partial, self.delta_partial,self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta,self.theta)  
                 else:
                     self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.store_imageGPU(t)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -1442,9 +1387,7 @@ class migration:
                 if self.pmt.approximation == "TTI":
                     self.theta_grad += self.theta_partial
             self.ilum += self.ilum_partial
-            self.wf.save_snapshotGPU(shot)
             self.save_snapshotBCKGPU(shot)
-            self.save_imageGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
         self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
@@ -1544,7 +1487,6 @@ class migration:
                     self.theta_partial = cp.zeros_like(self.migrated_image)
             for k in range(self.pmt.nt):
                 self.forward_stepGPU_RBC(k)
-                self.wf.store_snapshotGPU(k)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
             self.wf.current, self.wf.future = self.wf.future, self.wf.current    
@@ -1583,7 +1525,6 @@ class migration:
                             calculateGradientTTICuda(u_curr, adj, self.epsilon_partial, self.delta_partial, self.theta_partial, self.pmt.dx, self.pmt.dz, self.pmt.nx, self.pmt.nz,self.epsilon,self.delta,self.theta)  
                 else:
                     self.migrated_partial += (self.wf.current[self.pmt.N_abc:self.pmt.nz_abc - self.pmt.N_abc,self.pmt.N_abc:self.pmt.nx_abc - self.pmt.N_abc] * adj)
-                self.store_imageGPU(t)
                 #swap
                 self.wf.current, self.wf.future = self.wf.future, self.wf.current
                 self.currentbck, self.futurebck = self.futurebck, self.currentbck
@@ -1596,9 +1537,7 @@ class migration:
                 if self.pmt.approximation == "TTI":
                     self.theta_grad += self.theta_partial
             self.ilum += self.ilum_partial
-            self.wf.save_snapshotGPU(shot)
             self.save_snapshotBCKGPU(shot)
-            self.save_imageGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
         self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))

@@ -56,7 +56,7 @@ def gaussian_kernel(x, z, sigma):
 
 @jit(nopython=True)
 def gaussian_filter2D(sigma):
-    kernel_size = int(np.ceil(2.0 * sigma + 1))
+    kernel_size = int(np.ceil(6.0 * sigma + 1))
     if kernel_size % 2 == 0:
         kernel_size += 1
 
