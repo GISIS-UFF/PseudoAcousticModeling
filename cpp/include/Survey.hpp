@@ -7,9 +7,6 @@ class Survey
 {
 public:
     Survey();
-    
-    void readParameters();
-    void readGeometry();
 
     // Tipo de processamento
     std::string unit;
@@ -18,29 +15,29 @@ public:
     std::string ABC;
 
     // Discretização
-    float dx = 0.0f;
-    float dz = 0.0f;
-    float dt = 0.0f;
+    float dx;
+    float dz;
+    float dt;
 
     // Dimensões físicas
-    float L = 0.0f;
-    float D = 0.0f;
-    float T = 0.0f;
+    float L;
+    float D;
+    float T;
 
     // Camada absorvente
-    int N_abc = 0;
+    int N_abc;
 
     // Fonte
-    float fcut = 0.0f;
-    float tlag = 0.0f;
+    float fcut;
+    float tlag;
 
     // Dimensões discretas
-    int nx = 0;
-    int nz = 0;
-    int nt = 0;
+    int nx;
+    int nz;
+    int nt;
 
-    int nx_abc = 0;
-    int nz_abc = 0;
+    int nx_abc;
+    int nz_abc;
 
     // Eixos
     std::vector<float> x;
@@ -48,38 +45,38 @@ public:
     std::vector<float> t;
 
     // Migração
-    float sigma = 0.0f;
-    float dvel = 0.0f;
-    float ratio = 0.0f;
-    float shift = 0.0f;
-    float window = 0.0f;
-    float v0 = 0.0f;
+    float sigma;
+    float dvel;
+    float ratio;
+    float shift;
+    float window;
+    float v0;
 
     bool reciprocity = false;
     bool mirror = false;
 
     // Snapshots
-    int step = 0;
-    int last_save = 0;
+    int step;
+    int last_save;
     bool snap = false;
 
     // FWI
     bool fwi = false;
-    int niter = 0;
+    int niter;
 
     std::vector<float> freqs;
 
-    float vmin = 0.0f;
-    float vmax = 0.0f;
+    float vmin;
+    float vmax;
 
-    float epsmin = 0.0f;
-    float epsmax = 0.0f;
+    float epsmin;
+    float epsmax;
 
-    float deltamin = 0.0f;
-    float deltamax = 0.0f;
+    float deltamin;
+    float deltamax;
 
-    float thetamin = 0.0f;
-    float thetamax = 0.0f;
+    float thetamin;
+    float thetamax;
 
     bool multiparameter = false;
 
@@ -91,7 +88,7 @@ public:
     bool modelfromvp = false;
     bool waterlayer = false;
 
-    int idx_water = 0;
+    int idx_water;
 
     // Arquivos da aquisição
     std::string rec_file;
@@ -123,7 +120,10 @@ public:
     std::vector<int> sx;
     std::vector<int> sz;
 
-    int Nrec = 0;
-    int Nshot = 0;
+    int Nrec;
+    int Nshot;
 
+private:
+    void readParameters()
+    void readGeometry()
 };

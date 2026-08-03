@@ -16,9 +16,9 @@ Survey::Survey()
     readGeometry();
 }
 
-void read_csv(std::string filename, std::vector<float>& x,std::vector<float>& z)
+void read_csv(std::string path, std::vector<float>& x,std::vector<float>& z)
 {
-    std::ifstream file(filename);
+    std::ifstream file(path);
     if (file.is_open()){
         std::string line;
         getline(file, line);
@@ -34,8 +34,6 @@ void read_csv(std::string filename, std::vector<float>& x,std::vector<float>& z)
             z.push_back(std::stof(coordz));
         }
     }
-
-    file.close();
 }
 
 void Survey::readParameters() 
