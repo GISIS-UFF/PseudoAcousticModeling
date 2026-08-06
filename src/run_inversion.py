@@ -10,7 +10,6 @@ wf.initializeWavefields()
 wf.loadModels()
 
 mig = migration(wf,pmt)
-mig.initializeMigrationfields()
 
 inv = fwi(pmt, wf, mig)
 

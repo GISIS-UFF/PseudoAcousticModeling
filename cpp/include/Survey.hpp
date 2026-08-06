@@ -35,7 +35,8 @@ public:
     int nx;
     int nz;
     int nt;
-
+    int itlag;
+    int nt_data
     int nx_abc;
     int nz_abc;
 

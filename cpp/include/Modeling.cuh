@@ -1,8 +1,11 @@
 #pragma once
-
-#include <string>
-#include <vector>
 #include "Survey.hpp"
+# include <cuda_runtime.h>
+# include <curand_kernel.h>
+#include <fstream>
+#include <iostream>
+
+# define nThreads 256
 
 class Modeling 
 {
@@ -10,9 +13,8 @@ public:
     Survey* pmt;
 
     Modeling(Survey* parameters);
-    ~Modeling();
-
     float* source;
+    float* A;
 
     // Modelos
     float* vp = nullptr;
@@ -32,19 +34,15 @@ public:
 
     // Sismograma
     float* seismogram = nullptr;
-
-    // CPML
-    float* PsixFR = nullptr;
-    float* PsixFL = nullptr;
-    float* PsizFU = nullptr;
-    float* PsizFD = nullptr;
-    float* ZetaxFR = nullptr;
-    float* ZetaxFL = nullptr;
-    float* ZetazFU = nullptr;
-    float* ZetazFD = nullptr;
+    float* seismograms = nullptr;
 
     void Initializefields();
     void create_wavelet();
+    void importBin(std::string path, float* array, int n);
+    void exportBin(std::string path, float* array, int n);
+    void expandModel(float* model, float* output);
+    void reduceModel(const float* model_exp, float* output);
+
     
 
 }

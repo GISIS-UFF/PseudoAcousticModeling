@@ -101,10 +101,11 @@ class migration:
 
     def loadSeismogram(self, shot):
         if self.pmt.fwi  == True:
-            seismogramFile = f"{self.pmt.seismogramFolder}residual_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}.bin"
+            seismogramFile = f"{self.pmt.seismogramFolder}residual_shot_{shot+1}_Nt{self.pmt.nt_data}_Nrec{self.pmt.Nrec}.bin"
         else:
-            seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
-        seismogram = np.fromfile(seismogramFile, dtype=np.float32).reshape(self.pmt.nt,self.pmt.Nrec)
+            seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt_data}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
+        
+        seismogram = np.fromfile(seismogramFile, dtype=np.float32).reshape(self.pmt.nt_data,self.pmt.Nrec)
         return seismogram
 
     def save_snapshotBCK(self,shot, k):        
@@ -238,56 +239,52 @@ class migration:
                 updateWaveEquationTTIGPU(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp, self.wf.theta_exp)
 
     def backward_step(self,k,P=None):
+        if k >= self.pmt.itlag:
+            it = k - self.pmt.itlag
+            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz))
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             self.futurebck = updateWaveEquation(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
             self.futurebck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.futurebck, self.wf.A)
             self.currentbck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.currentbck, self.wf.A)
         elif self.pmt.approximation == "acoustic" and self.pmt.ABC == "CPML":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD = updatePsi(self.wf.PsixFR, self.wf.PsixFL,self.wf.PsizFU, self.wf.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD = updateZeta(self.wf.PsixFR, self.wf.PsixFL, self.wf.ZetaxFR, self.wf.ZetaxFL,self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             self.futurebck = updateWaveEquationCPML(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt, self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.N_abc)                        
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             self.futurebck = updateAdjointWaveEquationVTI(self.futurebck,self.currentbck,P,self.AUc,self.BUc,self.QCxUc,self.QCzUc,self.pmt.nx_abc,self.pmt.nz_abc,self.pmt.dt,self.pmt.dx,self.pmt.dz,self.wf.vp_exp,self.wf.epsilon_exp,self.wf.delta_exp)
             self.futurebck = AbsorbingBoundary(self.pmt.N_abc,self.pmt.nz_abc,self.pmt.nx_abc,self.futurebck,self.wf.A)
             self.currentbck = AbsorbingBoundary(self.pmt.N_abc,self.pmt.nz_abc,self.pmt.nx_abc,self.currentbck,self.wf.A)
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "CPML":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD = updatePsi(self.wf.PsixFR, self.wf.PsixFL,self.wf.PsizFU, self.wf.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD = updateZeta(self.wf.PsixFR, self.wf.PsixFL, self.wf.ZetaxFR, self.wf.ZetaxFL,self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             self.futurebck = updateWaveEquationVTICPML(self.futurebck, self.currentbck, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp,self.pmt.nx_abc, self.pmt.nz_abc, self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.N_abc)
         elif self.pmt.approximation == "TTI" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             self.futurebck = updateAdjointWaveEquationTTI(self.futurebck,self.currentbck,P,self.AUc,self.BUc,self.HUc,self.QCxUc,self.QCzUc,self.pmt.nx_abc,self.pmt.nz_abc,self.pmt.dt,self.pmt.dx,self.pmt.dz,self.wf.vp_exp,self.wf.epsilon_exp,self.wf.delta_exp,self.wf.theta_exp)
             # Apply absorbing boundary condition
             self.futurebck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.futurebck, self.wf.A)
             self.currentbck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.currentbck, self.wf.A)
 
     def backward_stepGPU(self,k,P=None):
+        if k >= self.pmt.itlag:
+            it = k - self.pmt.itlag
+            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz))
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             updateWaveEquationGPU(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
             self.futurebck, self.currentbck = AbsorbingBoundaryGPU(self.futurebck,self.currentbck,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.wf.A)
         elif self.pmt.approximation == "acoustic" and self.pmt.ABC == "CPML":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             updatePsiGPU(self.wf.PsixFR, self.wf.PsixFL,self.wf.PsizFU, self.wf.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             updateZetaGPU(self.wf.PsixFR, self.wf.PsixFL, self.wf.ZetaxFR, self.wf.ZetaxFL,self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             updateWaveEquationCPMLGPU(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt, self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.N_abc)                        
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             solveAdjointWaveEquationVTICuda(self.futurebck,self.currentbck,P,self.AUc,self.BUc,self.QCxUc,self.QCzUc,self.pmt.dt,self.pmt.dx,self.pmt.dz,self.pmt.nx_abc,self.pmt.nz_abc,self.wf.vp_exp,self.wf.epsilon_exp,self.wf.delta_exp)
             self.futurebck, self.currentbck = AbsorbingBoundaryGPU(self.futurebck,self.currentbck,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc,self.wf.A)
         elif self.pmt.approximation == "VTI" and self.pmt.ABC == "CPML":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             updatePsiGPU(self.wf.PsixFR, self.wf.PsixFL,self.wf.PsizFU, self.wf.PsizFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx, self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             updateZetaGPU(self.wf.PsixFR, self.wf.PsixFL, self.wf.ZetaxFR, self.wf.ZetaxFL,self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.nx_abc, self.pmt.nz_abc, self.currentbck, self.pmt.dx,self.pmt.dz, self.pmt.N_abc, self.wf.f_pico, self.wf.d0, self.pmt.dt, self.wf.vp_exp)
             updateWaveEquationVTICPMLGPU(self.futurebck, self.currentbck, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp,self.pmt.nx_abc, self.pmt.nz_abc, self.wf.PsixFR, self.wf.PsixFL, self.wf.PsizFU, self.wf.PsizFD, self.wf.ZetaxFR, self.wf.ZetaxFL, self.wf.ZetazFU, self.wf.ZetazFD, self.pmt.N_abc)
         elif self.pmt.approximation == "TTI" and self.pmt.ABC == "cerjan":
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[k, :] / (self.pmt.dx*self.pmt.dz))
             solveAdjointWaveEquationTTICuda(self.futurebck,self.currentbck,P,self.AUc,self.BUc,self.HUc,self.QCxUc,self.QCzUc,self.pmt.dt,self.pmt.dx,self.pmt.dz,self.pmt.nx_abc,self.pmt.nz_abc,self.wf.vp_exp,self.wf.epsilon_exp,self.wf.delta_exp,self.wf.theta_exp)
             # Apply absorbing boundary condition
             self.futurebck, self.currentbck = AbsorbingBoundaryGPU(self.futurebck,self.currentbck,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.wf.A)
@@ -510,7 +507,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.migrated_partial = np.zeros_like(self.migrated_image)
             self.ilum_partial = np.zeros_like(self.ilum)
             if self.pmt.fwi == True and self.pmt.multiparameter == True:
@@ -631,7 +628,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.migrated_partial = np.zeros_like(self.migrated_image)
             self.ilum_partial = np.zeros_like(self.ilum)
             if self.pmt.fwi == True and self.pmt.multiparameter == True:
@@ -757,7 +754,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.migrated_partial = np.zeros_like(self.migrated_image)
             self.ilum_partial = np.zeros_like(self.ilum)
             if self.pmt.fwi == True and self.pmt.multiparameter == True:
@@ -883,7 +880,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.migrated_partial = np.zeros_like(self.migrated_image)
             self.ilum_partial = np.zeros_like(self.ilum)
             if self.pmt.fwi == True and self.pmt.multiparameter == True:
@@ -1024,7 +1021,7 @@ class migration:
             if self.pmt.fwi == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)
             self.muted_seismogram = cp.asarray(self.muted_seismogram,dtype=cp.float32)
             self.migrated_partial = cp.zeros_like(self.migrated_image)
             self.ilum_partial = cp.zeros_like(self.migrated_image)
@@ -1172,7 +1169,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.muted_seismogram = cp.asarray(self.muted_seismogram,dtype=cp.float32)
             self.migrated_partial = cp.zeros_like(self.migrated_image)
             self.ilum_partial = cp.zeros_like(self.migrated_image)
@@ -1324,7 +1321,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.muted_seismogram = cp.asarray(self.muted_seismogram,dtype=cp.float32)
             self.migrated_partial = cp.zeros_like(self.migrated_image)
             self.ilum_partial = cp.zeros_like(self.migrated_image)
@@ -1475,7 +1472,7 @@ class migration:
             if self.pmt.fwi  == True:
                 self.muted_seismogram = seismogram
             else:
-                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt,self.pmt.tlag, self.pmt.shift,self.pmt.window,self.pmt.v0)      
+                self.muted_seismogram = Mute(seismogram, shot, self.pmt.rec_x, self.pmt.rec_z, self.pmt.shot_x, self.pmt.shot_z, self.pmt.dt, self.pmt.shift,self.pmt.window,self.pmt.v0)      
             self.muted_seismogram = cp.asarray(self.muted_seismogram,dtype=cp.float32)
             self.migrated_partial = cp.zeros_like(self.migrated_image)
             self.ilum_partial = cp.zeros_like(self.migrated_image)

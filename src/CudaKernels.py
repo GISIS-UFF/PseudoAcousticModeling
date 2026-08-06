@@ -7,7 +7,6 @@ void AbsorbingBoundaryCuda(float* Uf , float* Uc, int N_abc, int nz, int nx, flo
     int total_size = nz * nx;
     if (i >= total_size) return;
 
-    // Get 2D coordinates from linear i 'i'
     int iz = i / nx;
     int ix = i % nx;
 

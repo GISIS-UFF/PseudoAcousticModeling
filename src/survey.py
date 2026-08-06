@@ -40,7 +40,9 @@ class parameters:
         # Number of points in each direction
         self.nx = int(self.L/self.dx)+1
         self.nz = int(self.D/self.dz)+1
-        self.nt = int((self.T + self.tlag)/self.dt)+1
+        self.itlag = int(self.tlag / self.dt)
+        self.nt_data = int(self.T / self.dt) + 1
+        self.nt = self.itlag + self.nt_data
 
         self.nx_abc = self.nx + 2*self.N_abc
         self.nz_abc = self.nz + 2*self.N_abc

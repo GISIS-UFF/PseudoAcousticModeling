@@ -98,9 +98,11 @@ void Survey::readParameters()
     gradientsFolder = parameters["gradientsFolder"].get<std::string>();
 
     tlag = 2.0f * std::sqrt(pi)/fcut;
+    itlag = std::round(tlag/dt);
+    nt_data = std::round(T/dt) + 1;
     nx = std::round(L/dx) + 1;
     nz = std::round(D/dz) + 1;
-    nt = std::round((T+tlag)/dt) + 1;
+    nt = itlag + nt_data;
     nx_abc = nx + 2*N_abc;
     nz_abc = nz + 2*N_abc;
 

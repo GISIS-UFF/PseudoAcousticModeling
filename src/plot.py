@@ -4,13 +4,13 @@ from survey import parameters
 pmt = parameters("../inputs/Parameters.json")
 plt = plotting(pmt)
 
-# plt.viewModel(f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin")
+# plt.viewModel(f"/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin")
 # plt.viewHistory()
 # plt.viewSnapshot("VTIforward_shot_1_Nx301_Nz301_Nt4001_frame_600.bin","/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin")
-plt.movieSnapshot(f"acousticforward_shot_10_Nx301_Nz301_Nt5178_frame", f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin",backward=False,interval=200,savegif=True)
-# plt.viewSeismogram(f"../outputs/seismograms/seismogram_shot_32_Nt8178_Nrec170_fcut20.0.bin", perc=99)
+# plt.movieSnapshot(f"acousticforward_shot_10_Nx301_Nz301_Nt5178_frame", f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin",backward=False,interval=200,savegif=True)
+plt.viewSeismogram(f"../outputs/seismograms/seismogram_shot_4_Nt40001_Nrec100_fcut30.0.bin", perc=99)
 # plt.viewSeismogramComparison(95,0,"../outputs/seismograms/VTIseismogram_shot_1_Nt20001_Nrec501.bin", "../outputs/seismograms/VTINewseismogram_shot_1_Nt20001_Nrec501.bin")
-# plt.viewImage(f"/home/processamento/PseudoAcousticModeling/outputs/images/migrated_image_acoustic_Nx301_Nz301.bin",laplacian=True,perc=99)
+plt.viewImage(f"../outputs/images/migrated_image_acoustic_Nx301_Nz301.bin",laplacian=True,perc=99)
 # plt.plotImageTrace(f"{pmt.migratedimageFolder}migrated_image_{pmt.approximation}_Nx{pmt.nx}_Nz{pmt.nz}.bin", f"../inputs/layer2vp_Nz{pmt.nz}_Nx{pmt.nx}.bin", laplacian = True, ix=None, perc=99)
 # plt.movieSnapshot(f"VTIbackward_shot_10_Nx301_Nz301_Nt5178_frame", f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin",backward=True,interval=200,savegif=True)
 

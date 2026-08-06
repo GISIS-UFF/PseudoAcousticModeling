@@ -58,7 +58,7 @@ class wavefield:
         self.vp         = np.zeros([self.pmt.nz,self.pmt.nx],dtype=np.float32)
         self.current    = np.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
         self.future     = np.zeros([self.pmt.nz_abc,self.pmt.nx_abc],dtype=np.float32)
-        self.seismogram = np.zeros([self.pmt.nt,self.pmt.Nrec],dtype=np.float32)
+        self.seismogram = np.zeros([self.pmt.nt_data,self.pmt.Nrec],dtype=np.float32)
         if self.pmt.approximation in ["VTI", "TTI"]:
             # Initialize epsilon and delta models
             self.epsilon = np.zeros([self.pmt.nz,self.pmt.nx],dtype=np.float32)
@@ -79,7 +79,7 @@ class wavefield:
         if self.pmt.unit == "GPU":
             self.current = cp.asarray(self.current, dtype=cp.float32)
             self.future  = cp.asarray(self.future, dtype=cp.float32)
-            self.seismogram_gpu = cp.zeros((self.pmt.nt, self.pmt.Nrec), dtype=cp.float32)
+            self.seismogram_gpu = cp.zeros((self.pmt.nt_data, self.pmt.Nrec), dtype=cp.float32)
             if self.pmt.ABC == "CPML":
                 self.PsixFR      = cp.asarray(self.PsixFR, dtype=cp.float32)
                 self.PsixFL      = cp.asarray(self.PsixFL, dtype=cp.float32)     
@@ -256,7 +256,7 @@ class wavefield:
                 print("WARNING: Dispersion or stability conditions not satisfied.")
     
     def createCerjanVector(self):
-        sb = 3. * self.pmt.N_abc
+        sb = 6. * self.pmt.N_abc
         A = np.ones(self.pmt.N_abc)
         for i in range(self.pmt.N_abc):
                 fb = (self.pmt.N_abc - i) / (1.4142 * sb)
@@ -290,13 +290,17 @@ class wavefield:
         self.snap_idx += 1
     
     def store_seismogram(self,k,rz,rx):
+        it = k - self.pmt.itlag
+        if it < 0:
+            return
+
         if self.pmt.unit == "CPU":
-            self.seismogram[k, :] = self.current[rz, rx] 
+            self.seismogram[it, :] = self.current[rz, rx] 
         else:
-            self.seismogram_gpu[k, :] = self.current[rz, rx]
+            self.seismogram_gpu[it, :] = self.current[rz, rx]
 
     def save_seismogram(self,shot):     
-        self.seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
+        self.seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt_data}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
         self.seismogram.tofile(self.seismogramFile)
         print(f"info: Seismogram saved to {self.seismogramFile}")
 

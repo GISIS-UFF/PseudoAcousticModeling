@@ -61,7 +61,7 @@ class plotting:
         return(-g)
 
     def viewSeismogram(self,filename, perc=99):
-        sism = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nt,self.pmt.Nrec) 
+        sism = np.fromfile(filename, dtype=np.float32).reshape(self.pmt.nt_data,self.pmt.Nrec) 
         plt.figure(figsize=(5, 5))
         perc = np.percentile(np.abs(sism), perc)
         plt.imshow(sism, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, self.pmt.Nrec, self.pmt.T, 0])

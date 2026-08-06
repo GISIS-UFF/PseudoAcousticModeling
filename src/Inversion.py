@@ -246,6 +246,17 @@ class fwi:
 
         return alpha
 
+    def adjustfmax(self,fmax):
+        self.pmt.fcut = fmax
+        self.pmt.tlag = 2.0*np.sqrt(np.pi)/self.pmt.fcut
+        self.pmt.itlag = int(self.pmt.tlag / self.pmt.dt)
+        self.pmt.nt = self.pmt.itlag + self.pmt.nt_data
+        self.pmt.t = (np.arange(self.pmt.nt,dtype=np.float32) * self.pmt.dt)
+        self.wf.createSourceWavelet()
+        
+        if self.pmt.migration == "SB":
+            self.mig.initializeMigrationfields()
+
     def loadGradientVp(self):
         gradientFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
         grad = np.fromfile(gradientFile, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
@@ -267,12 +278,12 @@ class fwi:
         return grad
     
     def loadObsSeismogram(self,shot):
-        seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
-        seismogram = np.fromfile(seismogramFile, dtype=np.float32).reshape(self.pmt.nt,self.pmt.Nrec) 
+        seismogramFile = f"{self.pmt.seismogramFolder}seismogram_shot_{shot+1}_Nt{self.pmt.nt_data}_Nrec{self.pmt.Nrec}_fcut{self.pmt.fcut}.bin"
+        seismogram = np.fromfile(seismogramFile, dtype=np.float32).reshape(self.pmt.nt_data,self.pmt.Nrec) 
         return seismogram
 
     def save_residual(self,shot,residual):        
-        self.seismogramFile = f"{self.pmt.seismogramFolder}residual_shot_{shot+1}_Nt{self.pmt.nt}_Nrec{self.pmt.Nrec}.bin"
+        self.seismogramFile = f"{self.pmt.seismogramFolder}residual_shot_{shot+1}_Nt{self.pmt.nt_data}_Nrec{self.pmt.Nrec}.bin"
         residual.tofile(self.seismogramFile)
         print(f"info: Residuo saved to {self.seismogramFile}")
 
@@ -322,12 +333,7 @@ class fwi:
         for fmax in self.pmt.freqs:
             print(f"\033[31minfo: FWI frequency {fmax} of {self.pmt.freqs}\033[0m")
 
-            self.pmt.fcut = fmax
-            self.pmt.tlag = 2.0*np.sqrt(np.pi)/self.pmt.fcut
-            self.pmt.nt = int((self.pmt.T + self.pmt.tlag)/self.pmt.dt)+1
-            self.pmt.t = np.arange(self.pmt.nt) * self.pmt.dt
-            self.wf.initializeWavefields()
-            self.wf.createSourceWavelet()
+            self.adjustfmax(fmax)
 
             s_vp_store = []
             y_vp_store = []
@@ -462,13 +468,7 @@ class fwi:
         for fmax in self.pmt.freqs:
             print(f"\033[31minfo: FWI frequency {fmax} of {self.pmt.freqs}\033[0m")
 
-            self.pmt.fcut = fmax
-            self.pmt.tlag = 2.0*np.sqrt(np.pi)/self.pmt.fcut
-            self.pmt.nt = int((self.pmt.T + self.pmt.tlag)/self.pmt.dt)+1
-            self.pmt.t = np.arange(self.pmt.nt) * self.pmt.dt
-            self.wf.initializeWavefields()
-            self.wf.createSourceWavelet()
-            self.mig.initializeMigrationfields()
+            self.adjustfmax(fmax)
 
             s_vp_store = []
             y_vp_store = []
@@ -710,12 +710,7 @@ class fwi:
         for fmax in self.pmt.freqs:
             print(f"\033[31minfo: FWI frequency {fmax} of {self.pmt.freqs}\033[0m")
 
-            self.pmt.fcut = fmax
-            self.pmt.tlag = 2.0*np.sqrt(np.pi)/self.pmt.fcut
-            self.pmt.nt = int((self.pmt.T + self.pmt.tlag)/self.pmt.dt)+1
-            self.pmt.t = np.arange(self.pmt.nt) * self.pmt.dt
-            self.wf.initializeWavefields()
-            self.wf.createSourceWavelet()
+            self.adjustfmax(fmax)
 
             s_vp_store = []
             y_vp_store = []

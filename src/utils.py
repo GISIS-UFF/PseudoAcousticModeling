@@ -28,13 +28,13 @@ def ricker(f0, t, t_lag, nt, dt):
     return source
 
 @jit(parallel=True)
-def Mute(seismogram, shot, rec_x, rec_z, shot_x, shot_z, dt,tlag,shift,window,v0=1500): 
+def Mute(seismogram, shot, rec_x, rec_z, shot_x, shot_z, dt,shift,window,v0=1500): 
     result = np.zeros_like(seismogram)
     Nt = seismogram.shape[0]
     Nrec = seismogram.shape[1]  
     for rec in prange(Nrec):
         dist = np.sqrt((rec_z[rec] - shot_z[shot])**2 + (rec_x[rec] - shot_x[shot])**2)
-        traveltimes = dist/v0 + tlag + shift
+        traveltimes = dist/v0 + shift
         t1 = traveltimes
         t2 = t1 + window
         for i in prange(Nt):
