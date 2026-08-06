@@ -34,7 +34,10 @@ public:
 
     // Sismograma
     float* seismogram = nullptr;
-    float* seismograms = nullptr;
+
+    // Snapshots
+    float* snapshots = nullptr
+    float* snapshot = nullptr
 
     void Initializefields();
     void create_wavelet();
@@ -42,7 +45,5 @@ public:
     void exportBin(std::string path, float* array, int n);
     void expandModel(float* model, float* output);
     void reduceModel(const float* model_exp, float* output);
-
-    
 
 }

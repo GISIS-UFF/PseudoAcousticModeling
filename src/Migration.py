@@ -201,25 +201,21 @@ class migration:
         print(f"info: Checkpoint saved to {checkpointFile}")
 
     def forward_step_RBC(self,k):
-        if self.pmt.approximation == "acoustic":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
+        self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
+        if self.pmt.approximation == "acoustic":      
             self.wf.future = updateWaveEquation(self.wf.future, self.wf.current, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
         elif self.pmt.approximation == "VTI":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
             self.wf.future = updateWaveEquationVTI(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp)
         elif self.pmt.approximation == "TTI":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
             self.wf.future = updateWaveEquationTTI(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp, self.wf.theta_exp)
 
     def forward_stepGPU_RBC(self,k):
+        self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
         if self.pmt.approximation == "acoustic":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
             updateWaveEquationGPU(self.wf.future, self.wf.current, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
         elif self.pmt.approximation == "VTI":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
             updateWaveEquationVTIGPU(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp)
         elif self.pmt.approximation == "TTI":
-            self.wf.current[self.wf.isz,self.wf.isx] += self.wf.source[k]
             updateWaveEquationTTIGPU(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp, self.wf.theta_exp)
    
     def reconstructed_step(self):

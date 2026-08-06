@@ -5,25 +5,10 @@ Modeling::Modeling(Survey* parameters)
     pmt = parameters;
 }
 
-Modeling::deleteCPU()
-{
-    delete[] source;
-    delete[] A;
-    delete[] vp;
-    delete[] epsilon;
-    delete[] delta;
-    delete[] theta;
-    delete[] vp_exp;
-    delete[] epsilon_exp;
-    delete[] delta_exp;
-    delete[] theta_exp;
-    delete[] current;
-    delete[] future;
-    delete[] seismogram;
-}
-
 Modeling::deleteGPU()
-{
+{   
+    cudaFree(rx);
+    cudaFree(rz);
     cudaFree(source);
     cudaFree(A);
     cudaFree(vp);
@@ -37,75 +22,62 @@ Modeling::deleteGPU()
     cudaFree(current);
     cudaFree(future);
     cudaFree(seismograms);
-}
 
-Modeling::AllocateGPU()
-{
-    int n_model = pmt->nx * pmt->nz;
-    int n_model_exp = pmt->nx_abc * pmt->nz_abc;
-    int n_seismogram = pmt->Nrec * pmt->nt;
+    if (pmt->snap == true){
+        cudaFree(snapshots);
+    }
+    
 
-    cudaMalloc((void**)&source, pmt->nt * sizeof(float));
-    cudaMalloc((void**)&A, pmt->N_abc * sizeof(float));
-
-    cudaMalloc((void**)&vp, n_model * sizeof(float));
-    cudaMalloc((void**)&epsilon, n_model * sizeof(float));
-    cudaMalloc((void**)&delta, n_model * sizeof(float));
-    cudaMalloc((void**)&theta, n_model * sizeof(float));
-
-    cudaMalloc((void**)&vp_exp, n_model_exp * sizeof(float));
-    cudaMalloc((void**)&epsilon_exp, n_model_exp * sizeof(float));
-    cudaMalloc((void**)&delta_exp, n_model_exp * sizeof(float));
-    cudaMalloc((void**)&theta_exp, n_model_exp * sizeof(float));
-
-    cudaMalloc((void**)&current, n_model_exp * sizeof(float));
-    cudaMalloc((void**)&future, n_model_exp * sizeof(float));
-
-    cudaMalloc((void**)&seismograms, n_seismogram * pmt->Nrec * sizeof(float));
 }
 
 void Modeling::initializeFields(){
     int n_model = pmt->nx * pmt->nz;
     int n_model_exp = pmt->nx_abc * pmt->nz_abc;
     int n_seismogram = pmt->Nrec * pmt->nt;
+
+    nBlocks = (int)((n_model_exp + nThreads - 1) / nThreads);
     
-    source = new float[pmt->nt]();
+    cudaMalloc((void**)&source, pmt->nt * sizeof(float));
+    if (pmt->ABC == "cerjan"){
+        cudaMalloc((void**)&A, pmt->N_abc * sizeof(float));
+    }
+    
+    cudaMalloc((void**)&vp, n_model * sizeof(float));
+    cudaMalloc((void**)&vp_exp, n_model_exp * sizeof(float));
 
-    vp = new float[n_model]();
-    vp_exp = new float[n_model_exp]();
+    cudaMalloc((void**)&current, n_model_exp * sizeof(float));
+    cudaMalloc((void**)&future, n_model_exp * sizeof(float));
+    cudaMalloc((void**)&seismogram, n_seismograms * sizeof(float));
+    if (pmt->snap == true){
+        int n_snaps = round((pmt->last_save + 1) / pmt->step)
+        cudaMalloc((void**)&snapshots, n_model * n_snaps * sizeof(float) )
+        snapshot = new float[n_model]();
+    }
 
-    current = new float[n_model_exp]();
-    future = new float[n_model_exp]();
-
-    seismogram = new float[n_seismogram]();
-    seismograms = new float[n_seismogram * pmt->Nrec]();
-
-    nBlocks = (int)((n_model_exp + NTHREADS - 1) / NTHREADS);
+    cudaMalloc((void**)&rx, pmt->Nrec * sizeof(int));
+    cudaMalloc((void**)&rz, pmt->Nrec * sizeof(int));
+    cudaMemcpy(rx, pmt->rx, pmt->Nrec * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(rz, pmt->rz, pmt->Nrec * sizeof(int), cudaMemcpyHostToDevice);
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI") {
-        
-        epsilon = new float[n_model]();
-        delta = new float[n_model]();
-        theta = new float[n_model]();
-
-        epsilon_exp = new float[n_model_exp]();
-        delta_exp = new float[n_model_exp]();
-        theta_exp = new float[n_model_exp]();
-
+        cudaMalloc((void**)&epsilon, n_model * sizeof(float));
+        cudaMalloc((void**)&delta, n_model * sizeof(float));
+        cudaMalloc((void**)&epsilon_exp, n_model_exp * sizeof(float));
+        cudaMalloc((void**)&delta_exp, n_model_exp * sizeof(float));
     }
 
     if (pmt->approximation == "TTI") {
-
-        theta = new float[n_model]();
-        theta_exp = new float[n_model_exp]();
+        cudaMalloc((void**)&theta, n_model * sizeof(float));
+        cudaMalloc((void**)&theta_exp, n_model_exp * sizeof(float));
     }
+
 }
 
 void Modeling::createWavelet(){
     float tlag = pmt->tlag;
     float dt = pmt->dt;
     float fcut = pmt->fcut;
-
+    float* source_cpu = new float[pmt->nt]();
     float scale = 1.0f / (pmt->dx * pmt->dz);
     float fc = fcut / (3.0f * sqrtf(pi));
     for (int n = 0; n < pmt->nt; n++){
@@ -113,8 +85,10 @@ void Modeling::createWavelet(){
 
         float arg = pi*pi*pi*fc*fc*td*td;
 
-        source[n] = (1.0f - 2.0f*arg)*expf(-arg)*scale;
+        source_cpu[n] = (1.0f - 2.0f*arg)*expf(-arg)*scale;
     }
+    cudaMemcpy(source, source_cpu, pmt->nt * sizeof(float), cudaMemcpyHostToDevice);
+    delete[] source_cpu;
 }
 
 void Modeling::importBin(std::string path, float* array, int n){
@@ -122,8 +96,10 @@ void Modeling::importBin(std::string path, float* array, int n){
     if (!file.is_open()){
         throw std::invalid_argument("Could not open file. Please verify the file path.");
     }
-
-    file.read((char *) array, n * sizeof(float));
+    float* array_cpu = new float[n]();
+    file.read((char *) array_cpu, n * sizeof(float));
+    cudaMemcpy(array, array_cpu, n * sizeof(float), cudaMemcpyHostToDevice);
+    delete[] array_cpu;
     file.close();
 }
 
@@ -137,102 +113,15 @@ void Modeling::exportBin(std::string path, float* array, int n){
     file.close();
 }
 
-void Modeling::expandModel(float* model, float* output){
-
-    int N_abc = pmt->N_abc;
-    int nx = pmt->nx;
-    int nz = pmt->nz;
-    int nx_abc = pmt->nx_abc;
-    int nz_abc = pmt->nz_abc;
-    int index;
-
-    // Centro
-    for (int j = 0; j < nz; j++){
-        for (int i = 0; i < nx; i++){
-            index = (j + N_abc)*nx_abc + (i + N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Esquerda
-    for (int j = 0; j < nz; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = (j + N_abc)*nx_abc + i;
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Direita
-    for (int j = 0; j < nz; j++){
-        for (int i = nx - N_abc; i < nx; i++){
-            index = (j + N_abc)*nx_abc + (i + 2*N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Superior
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < nx; i++){
-            index = j*nx_abc + (i + N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Inferior
-    for (int j = nz - N_abc; j < nz; j++){
-        for (int i = 0; i < nx; i++){
-            index = (j + 2*N_abc)*nx_abc + (i + N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Canto superior esquerdo
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = j *nx_abc + i;
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Canto superior direito
-    for (int j = 0; j < N_abc; j++){
-        for (int i = nx - N_abc; i < nx; i++){
-            index = j*nx_abc + (i + 2*N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Canto inferior esquerdo
-    for (int j = nz - N_abc; j < nz; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = (j + 2*N_abc)*nx_abc + i;
-            output[index] = model[j*nx + i];
-        }
-    }
-    // Canto inferior direito
-    for (int j = nz - N_abc; j < nz; j++){
-        for (int i = nx - N_abc; i < nx; i++){
-            index = (j + 2*N_abc)*nx_abc + (i + 2*N_abc);
-            output[index] = model[j*nx + i];
-        }
-    }
-}
-
-void Modeling::reduceModel(const float* model_exp, float* output)
-{
-    int N_abc = pmt->N_abc;
-    int nx = pmt->nx;
-    int nz = pmt->nz;
-    int nx_abc = pmt->nx_abc;
-
-    for (int j = 0; j < nz; j++){
-        for (int i = 0; i < nx; i++){
-            int index = (j + N_abc) * nx_abc + (i + N_abc);
-            output[j * nx + i] = model_exp[index];
-        }
-    }
-}
-
 void Modeling::createCerjanVector(){
     const float sb = 6.0f * pmt->N_abc;
-    float* A = new float[pmt->N_abc]();
+    float* A_cpu = new float[pmt->N_abc]();
     for (int i = 0; i < pmt->N_abc; i++){
         float fb = (pmt->N_abc - i) / (1.4142f * sb);
-        A[i] = expf(-fb * fb);
+        A_cpu[i] = expf(-fb * fb);
     }
+    cudaMemcpy(A, A_cpu, pmt->N_abc * sizeof(float), cudaMemcpyHostToDevice);
+    delete[] A_cpu;
 }
 
 void Modeling::resetFields(){
@@ -245,34 +134,101 @@ void Modeling::resetFields(){
 }
 
 void Modeling::fowardstep(const int k){
+    current[isz * nx_abc + isx] += source[k];
     if (pmt->approximation == "acoustic"){
-        current[isz * nx_abc + isx] += source[k];
         updateWaveEquation<<<nBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt);
         AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
     }
     if (pmt->approximation == "VTI"){
-        current[isz * nx_abc + isx] += source[k];
         updateWaveEquationVTICuda<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp_exp, epsilon_exp, delta_exp);
         AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
     }
     if (pmt->approximation == "TTI"){
-        current[isz * nx_abc + isx] += source[k];
         updateWaveEquationTTICuda<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp_exp, epsilon_exp, delta_exp, theta_exp);
         AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
     }
 }
 
-void Modeling::storeSeismogram(const int k){
-    int it = k - pmt->itlag;
+__global__ void expandModel(float* model, float* output, const int nx, const int nz,const int nx_abc, const int N_abc){
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_size = nx * nz;
 
-    if (it < 0){
-        return;
+    int iz = i / nx;
+    int ix = i % nx;
+    int index;
+
+    // Centro
+    if (iz >= 0 && iz < nz && ix >= 0 && ix < nx){
+        index = (iz + N_abc)*nx_abc + (ix + N_abc);
+        output[ixndex] = model[iz*nx + ix];
+    }
+    // Esquerda
+    if (iz >= 0 && iz < nz && ix >= 0 && ix < N_abc){
+        index = (iz + N_abc)*nx_abc + ix;
+        output[ixndex] = model[iz*nx + ix];
+    }
+    // Direita
+    if (iz >= 0 && iz < nz && ix >= nx - N_abc && ix < nx){
+        index = (iz + N_abc)*nx_abc + (ix + 2.0f*N_abc);
+        output[ixndex] = model[iz*nx + ix];
+    }
+    // Superior
+    if (iz >= 0 && iz < N_abc && ix >= 0 && ix < nx){
+        index = iz*nx_abc + (ix + N_abc);
+        output[ixndex] = model[iz*nx + ix];
+    }
+    // Inferior
+    if (iz >= nz - N_abc && iz < nz && ix >= 0 && ix < nx){
+            index = (iz + 2*N_abc)*nx_abc + (ix + N_abc);
+            output[index] = model[iz*nx + ix];
+    }
+    // Canto superior esquerdo
+    for (iz >= 0 && iz < N_abc && i >= 0 && i < N_abc){
+            index = iz *nx_abc + ix;
+            output[index] = model[iz*nx + ix];
+    }
+    // Canto superior direito
+    for (iz >= 0 && iz < N_abc && i >= nx - N_abc && i < nx){
+            index = iz*nx_abc + (ix + 2*N_abc);
+            output[index] = model[iz*nx + ix];
+    }
+    // Canto inferior esquerdo
+    for (iz >= nz - N_abc && iz < nz && i >= 0 && i < N_abc){
+            index = (iz + 2*N_abc)*nx_abc + ix;
+            output[index] = model[iz*nx + ix];
+    }
+    // Canto inferior direito
+    for (iz >= nz - N_abc && iz < nz && i >= nx - N_abc && i < nx){
+            index = (iz + 2*N_abc)*nx_abc + (ix + 2*N_abc);
+            output[index] = model[iz*nx + ix];
     }
 
-    seismograms[it * pmt->Nrec] = current[rx * pmt->Nrec + rz];
 }
 
+__global__ void reduceModel(const float* model_exp, float* output, int N_abc, int nx, int nz, int nx_abc)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_size = nx * nz;
 
+    int iz = i / nx;
+    int ix = i % nx;
+    int index;
+
+    // Centro
+    if (iz >= 0 && iz < nz && ix >= 0 && ix < nx){
+        index = (iz + N_abc)*nx_abc + (ix + N_abc);
+        output[iz*nx + ix] = model_exp[index];
+    }
+}
+
+__global__ void storeSeismogram(const float* current, float* seismograms, const int* rx, const int* rz, int k, int itlag, int nt, int Nrec, int nx_abc)
+{
+    int irec = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int it = k - itlag;
+    if (it < 0) return;
+    seismograms[it + irec*nt] = current[rz[irec] * nx_abc + rx[irec]];
+}
 
 __global__ void updateWaveEquation(float* __restrict__ Uf,const float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt)
 {
