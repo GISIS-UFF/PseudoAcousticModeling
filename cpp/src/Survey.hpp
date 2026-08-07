@@ -36,7 +36,7 @@ public:
     int nz;
     int nt;
     int itlag;
-    int nt_data
+    int nt_data;
     int nx_abc;
     int nz_abc;
 
@@ -53,16 +53,16 @@ public:
     float window;
     float v0;
 
-    bool reciprocity = false;
-    bool mirror = false;
+    bool reciprocity;
+    bool mirror;
 
     // Snapshots
     int step;
     int last_save;
-    bool snap = false;
+    bool snap;
 
     // FWI
-    bool fwi = false;
+    bool fwi;
     int niter;
 
     std::vector<float> freqs;
@@ -79,15 +79,15 @@ public:
     float thetamin;
     float thetamax;
 
-    bool multiparameter = false;
+    bool multiparameter;
 
     // Modelos sintéticos
-    bool layer2 = false;
-    bool layer3 = false;
-    bool gradientmodel = false;
-    bool diffractor = false;
-    bool modelfromvp = false;
-    bool waterlayer = false;
+    bool layer2;
+    bool layer3;
+    bool gradientmodel;
+    bool diffractor;
+    bool modelfromvp;
+    bool waterlayer;
 
     int idx_water;
 
@@ -125,6 +125,6 @@ public:
     int Nshot;
 
 private:
-    void readParameters()
-    void readGeometry()
+    void readParameters();
+    void readGeometry();
 };

@@ -4,6 +4,7 @@
 #include <sstream>
 #include <vector>
 #include <cmath>
+#include <omp.h>
 #include "Survey.hpp"
 
 using json = nlohmann::json;
@@ -21,15 +22,15 @@ void read_csv(std::string path, std::vector<float>& x,std::vector<float>& z)
     std::ifstream file(path);
     if (file.is_open()){
         std::string line;
-        getline(file, line);
-        while (getline(file, line)){
+        std::getline(file, line);
+        while (std::getline(file, line)){
             std::stringstream ss(line);
             std::string index;
             std::string coordx;
             std::string coordz;
-            getline(ss, index, ',');
-            getline(ss, coordx, ',');
-            getline(ss, coordz, ',');
+            std::getline(ss, index, ',');
+            std::getline(ss, coordx, ',');
+            std::getline(ss, coordz, ',');
             x.push_back(std::stof(coordx));
             z.push_back(std::stof(coordz));
         }
@@ -38,7 +39,7 @@ void read_csv(std::string path, std::vector<float>& x,std::vector<float>& z)
 
 void Survey::readParameters() 
 {
-    std::ifstream jsonFile("Parameters.json");
+    std::ifstream jsonFile("../inputs/Parameters.json");
     json parameters = json::parse(jsonFile);
 
     unit = parameters["unit"].get<std::string>();
@@ -143,12 +144,14 @@ void Survey::readGeometry()
     sx.resize(Nshot);
     sz.resize(Nshot);
 
+    # pragma omp parallel for
     for (int irec = 0; irec < Nrec; ++irec)
     {
         rx[irec] = std::round(rec_x[irec] / dx) + N_abc;
         rz[irec] = std::round(rec_z[irec] / dz) + N_abc;
     }
 
+    # pragma omp parallel for
     for (int ishot = 0; ishot < Nshot; ++ishot)
     {
         sx[ishot] = std::round(shot_x[ishot] / dx) + N_abc;
@@ -156,12 +159,14 @@ void Survey::readGeometry()
     }
 
     if (mirror)
-    {
+    {   
+        # pragma omp parallel for
         for (int irec = 0; irec < Nrec; ++irec)
         {
             rz[irec] = std::round(rec_z[irec] / dz) + N_abc - idx_water;
         }
 
+        # pragma omp parallel for
         for (int ishot = 0; ishot < Nshot; ++ishot)
         {
             sz[ishot] = std::round(shot_z[ishot] / dz) + N_abc - idx_water;
