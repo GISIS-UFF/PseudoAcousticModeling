@@ -30,7 +30,7 @@ void Modeling::freeMemory()
         cudaFree(theta);
     }
     if (pmt->snap == true){
-        cudaFree(snapshots);
+        cudaFreeHost(snapshot);
     }
 }
 
@@ -65,9 +65,7 @@ void Modeling::initializeFields()
     cudaMalloc((void**)&seismogram,n_seismogram * sizeof(float));
 
     if (pmt->snap == true){
-        const int n_snaps = pmt->last_save / pmt->step + 1;
-        cudaMalloc((void**)&snapshots, n_snaps * n_model * sizeof(float));
-        snap_idx = 0;
+        cudaMallocHost((void**)&snapshot,n_model*sizeof(float));
     }
 
     cudaMalloc((void**)&rx,pmt->Nrec * sizeof(int));
@@ -103,20 +101,6 @@ void Modeling::importBin(std::string path, float* array, int n){
     file.close();
 }
 
-void Modeling::exportBin(std::string path, float* array, int n){
-    float* array_h = new float[n];
-    cudaMemcpy(array_h,array,n * sizeof(float),cudaMemcpyDeviceToHost);
-
-    std::ofstream file(path, std::ios::out);
-    if (!file.is_open()){
-        throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
-    }
-    file.write((char*) array_h, n * sizeof(float));
-    std::cout<<"Info: File saved to " + path <<std::endl;
-    file.close();
-    delete[] array_h;
-}
-
 void Modeling::createCerjanVector(){
     const float sb = 6.0f * pmt->N_abc;
     float* A_h = new float[pmt->N_abc]();
@@ -130,117 +114,168 @@ void Modeling::createCerjanVector(){
 
 void Modeling::resetFields(){
     int n_model_exp = pmt->nx_abc * pmt->nz_abc;
+    const int n_seismogram = pmt->Nrec * pmt->nt_data;
     cudaMemset(current, 0, n_model_exp * sizeof(float));
     cudaMemset(future, 0, n_model_exp * sizeof(float));
-    if (pmt->snap == true){
-        snap_idx = 0;
-    }
+    cudaMemset(seismogram, 0, n_seismogram * sizeof(float));
 }
 
-void Modeling::expandModel(float* model, float* output){
+void Modeling::expandModel(float* __restrict__ model, float* __restrict__ output){
     int N_abc = pmt->N_abc;
     int nx = pmt->nx;
     int nz = pmt->nz;
     int nx_abc = pmt->nx_abc;
-    int index;
 
-    // Centro
-    # pragma omp parallel for
+    #pragma omp parallel for schedule(static)
     for (int j = 0; j < nz; j++){
+        // Centro
+        #pragma omp simd
         for (int i = 0; i < nx; i++){
-            index = (j + N_abc)*nx_abc + (i + N_abc);
+            const int index = (j + N_abc)*nx_abc + (i + N_abc);
             output[index] = model[j*nx + i];
         }
-    }
-
-    // Esquerda
-    # pragma omp parallel for
-    for (int j = 0; j < nz; j++){
+        // Esquerda e Direita
+        #pragma omp simd
         for (int i = 0; i < N_abc; i++){
-            index = (j + N_abc)*nx_abc + i;
-            output[index] = model[j*nx];
+            const int index_left = (j + N_abc)*nx_abc + i;
+            output[index_left] = model[j*nx];
+
+            const int index_right = (j + N_abc)*nx_abc + (nx + N_abc + i);
+            output[index_right] = model[j*nx + nx - 1];
         }
     }
-
-    // Direita
-    # pragma omp parallel for
-    for (int j = 0; j < nz; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = (j + N_abc)*nx_abc + (nx + N_abc + i);
-            output[index] = model[j*nx + nx - 1];
-        }
-    }
-
-    // Superior
-    # pragma omp parallel for
+    
+    #pragma omp parallel for schedule(static)
     for (int j = 0; j < N_abc; j++){
+        // Superior e Inferior
+        #pragma omp simd
         for (int i = 0; i < nx; i++){
-            index = j*nx_abc + (i + N_abc);
-            output[index] = model[i];
-        }
-    }
+            const int index_top = j*nx_abc + (i + N_abc);
+            output[index_top] = model[i];
 
-    // Inferior
-    # pragma omp parallel for
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < nx; i++){
-            index = (nz + N_abc + j)*nx_abc + (i + N_abc);
-            output[index] = model[(nz - 1)*nx + i];
+            const int index_bottom = (nz + N_abc + j)*nx_abc + (i + N_abc);
+            output[index_bottom] = model[(nz - 1)*nx + i];
         }
-    }
-
-    // Canto superior esquerdo
-    # pragma omp parallel for
-    for (int j = 0; j < N_abc; j++){
+        // Quinas
+        #pragma omp simd
         for (int i = 0; i < N_abc; i++){
-            index = j*nx_abc + i;
-            output[index] = model[0];
-        }
-    }
+            const int index_topleft = j*nx_abc + i;
+            output[index_topleft] = model[0];
 
-    // Canto superior direito
-    # pragma omp parallel for
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = j*nx_abc + (nx + N_abc + i);
-            output[index] = model[nx - 1];
-        }
-    }
+            const int index_topright = j*nx_abc + (nx + N_abc + i);
+            output[index_topright] = model[nx - 1];
 
-    // Canto inferior esquerdo
-    # pragma omp parallel for
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = (nz + N_abc + j)*nx_abc + i;
-            output[index] = model[(nz - 1)*nx];
-        }
-    }
-
-    // Canto inferior direito
-    # pragma omp parallel for
-    for (int j = 0; j < N_abc; j++){
-        for (int i = 0; i < N_abc; i++){
-            index = (nz + N_abc + j)*nx_abc + (nx + N_abc + i);
-            output[index] = model[(nz - 1)*nx + nx - 1];
+            const int index_bottomleft = (nz + N_abc + j)*nx_abc + i;
+            output[index_bottomleft] = model[(nz - 1)*nx];
+ 
+            const int index_bottomright = (nz + N_abc + j)*nx_abc + (nx + N_abc + i);
+            output[index_bottomright] = model[(nz - 1)*nx + nx - 1];
         }
     }
 }
 
-void Modeling::checkDispersionAndStability(const float* vp_h, const float* epsilon_h, const float* delta_h, const float* theta_h){
+void Modeling::checkDispersionAndStability(const float* __restrict__ vp_h, const float* __restrict__ epsilon_h, const float* __restrict__ delta_h, const float* __restrict__ theta_h){
     int n_model = pmt->nx * pmt->nz;
 
-    float vp_min = vp_h[0];
-    float vp_max = vp_h[0];
-
-    # pragma omp parallel for
-    for (int i = 1; i < n_model; i++){
-        vp_min = std::min(vp_min, vp_h[i]);
-        vp_max = std::max(vp_max, vp_h[i]);
-    }
+    float vp_min = std::numeric_limits<float>::infinity();
+    float vp_max = 0.0f;
 
     float dx_lim = 0.0f;
     float dz_lim = 0.0f;
     float dt_lim = 0.0f;
+
+    float epsilon_max = 0.0f;
+    float delta_max = 0.0f;
+
+    float max_stability = 0.0f;
+
+    float vpfase_min = std::numeric_limits<float>::infinity();
+    float vpfase_max = 0.0f;
+
+    float coeffs_8th[4] = {8.0f/5.0f, -1.0f/5.0f, 8.0f/315.0f, -1.0f/560.0f};
+
+    float soma = 0.0f;
+    for (int m = 1; m <= 4; m++){
+        soma += coeffs_8th[m - 1] * (1.0f - powf(-1.0f, m));
+    }
+
+    int nangles = 181;
+    float angle_max = 0.5f * pi;
+
+    if (pmt->approximation == "TTI"){
+        nangles = 361;
+        angle_max = pi;
+    }
+
+    float inv_dx = 1.0f / pmt->dx;
+    float inv_dz = 1.0f / pmt->dz;
+    float inv_dx2 = inv_dx * inv_dx;
+    float inv_dz2 = inv_dz * inv_dz;
+    float inv_dx4 = inv_dx2 * inv_dx2;
+    float inv_dz4 = inv_dz2 * inv_dz2;
+
+    #pragma omp parallel
+    {
+        #pragma omp for simd reduction(min:vp_min) reduction(max:vp_max) schedule(static)
+        for (int i = 0; i < n_model; i++){
+            vp_min = std::min(vp_min, vp_h[i]);
+            vp_max = std::max(vp_max, vp_h[i]);
+        }
+
+        if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
+            #pragma omp for simd reduction(max:epsilon_max) reduction(max:delta_max) reduction(max:max_stability) schedule(static)
+            for (int i = 0; i < n_model; i++){
+                epsilon_max = std::max(epsilon_max, epsilon_h[i]);
+                delta_max = std::max(delta_max, delta_h[i]);
+
+                float num = -2.0f * (epsilon_h[i] - delta_h[i]) * inv_dx2 * inv_dz2;
+                float den = (1.0f + 2.0f * epsilon_h[i]) * inv_dx4 + inv_dz4 + 2.0f * (1.0f + delta_h[i]) * inv_dx2 * inv_dz2;
+
+                float Sk = 0.0f;
+                if (fabsf(den) > 1e-12f){
+                    Sk = num / den;
+                }
+
+                float factor = ((1.0f + 2.0f * epsilon_h[i]) + Sk) * inv_dx2 + (1.0f + Sk) * inv_dz2;
+                max_stability = std::max(max_stability, vp_h[i] * sqrtf(factor));  
+            }
+
+            #pragma omp for reduction(min:vpfase_min) reduction(max:vpfase_max) schedule(static)
+            for (int ia = 0; ia < nangles; ia++){
+                float phi = angle_max * ia / (nangles - 1);
+
+                for (int i = 0; i < n_model; i++){
+                    float beta = phi;
+
+                    if (pmt->approximation == "TTI"){
+                        beta = phi - theta_h[i];
+                    }
+
+                    float seno = sinf(beta);
+                    float cosseno = cosf(beta);
+
+                    float sin2 = seno * seno;
+                    float cos2 = cosseno * cosseno;
+
+                    float sin4 = sin2 * sin2;
+                    float cos4 = cos2 * cos2;
+
+                    float num = -2.0f * (epsilon_h[i] - delta_h[i]) * sin2 * cos2;
+                    float den = (1.0f + 2.0f * epsilon_h[i]) * sin4 + cos4 + 2.0f * (1.0f + delta_h[i]) * sin2 * cos2;
+
+                    float Sk = 0.0f;
+                    if (fabsf(den) > 1e-12f){
+                        Sk = num / den;
+                    }
+
+                    float factor = (1.0f + 2.0f * epsilon_h[i]) * sin2 + cos2 + Sk;
+                    float vpfase = vp_h[i] * sqrtf(factor);
+                    vpfase_min = std::min(vpfase_min, vpfase);
+                    vpfase_max = std::max(vpfase_max, vpfase);    
+                }
+            }
+        }
+    }
 
     if (pmt->approximation == "acoustic"){
         float lambda_min = vp_min / pmt->fcut;
@@ -249,100 +284,10 @@ void Modeling::checkDispersionAndStability(const float* vp_h, const float* epsil
         dt_lim = dx_lim / (4.0f * vp_max);
     }
     else if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
-        float epsilon_max = epsilon_h[0];
-        float delta_max = delta_h[0];
+        dt_lim = sqrtf(2.0f) / (sqrtf(soma) * max_stability);
 
-        float inv_dx = 1.0f / pmt->dx;
-        float inv_dz = 1.0f / pmt->dz;
-        float inv_dx2 = inv_dx * inv_dx;
-        float inv_dz2 = inv_dz * inv_dz;
-        float inv_dx4 = inv_dx2 * inv_dx2;
-        float inv_dz4 = inv_dz2 * inv_dz2;
-
-        float coeffs_8th[4] = {8.0f/5.0f, -1.0f/5.0f, 8.0f/315.0f, -1.0f/560.0f};
-
-        float soma = 0.0f;
-        for (int m = 1; m <= 4; m++){
-            soma += coeffs_8th[m - 1] * (1.0f - powf(-1.0f, m));
-        }
-
-        float max_stability = 0.0f;
-
-        # pragma omp parallel for
-        for (int i = 0; i < n_model; i++){
-            epsilon_max = std::max(epsilon_max, epsilon_h[i]);
-            delta_max = std::max(delta_max, delta_h[i]);
-
-            float num = -2.0f * (epsilon_h[i] - delta_h[i]) * inv_dx2 * inv_dz2;
-            float den = (1.0f + 2.0f * epsilon_h[i]) * inv_dx4 + inv_dz4 + 2.0f * (1.0f + delta_h[i]) * inv_dx2 * inv_dz2;
-
-            float Sk = 0.0f;
-            if (fabsf(den) > 1e-12f){
-                Sk = num / den;
-            }
-
-            float factor = ((1.0f + 2.0f * epsilon_h[i]) + Sk) / (pmt->dx * pmt->dx) + (1.0f + Sk) / (pmt->dz * pmt->dz);
-
-            if (factor > 0.0f){
-                max_stability = std::max(max_stability, vp_h[i] * sqrtf(factor));
-            }
-        }
-
-        if (max_stability > 0.0f && soma > 0.0f){
-            dt_lim = sqrtf(2.0f) / (sqrtf(soma) * max_stability);
-        }
-
-        float vqp_min = std::numeric_limits<float>::infinity();
-        float vqp_max = 0.0f;
-
-        int nangles = 181;
-        float angle_max = 0.5f * pi;
-
-        if (pmt->approximation == "TTI"){
-            nangles = 361;
-            angle_max = pi;
-        }
-
-        # pragma omp parallel for
-        for (int ia = 0; ia < nangles; ia++){
-            float phi = angle_max * ia / (nangles - 1);
-
-            for (int i = 0; i < n_model; i++){
-                float beta = phi;
-
-                if (pmt->approximation == "TTI"){
-                    beta = phi - theta_h[i];
-                }
-
-                float seno = sinf(beta);
-                float cosseno = cosf(beta);
-
-                float sin2 = seno * seno;
-                float cos2 = cosseno * cosseno;
-
-                float sin4 = sin2 * sin2;
-                float cos4 = cos2 * cos2;
-
-                float num = -2.0f * (epsilon_h[i] - delta_h[i]) * sin2 * cos2;
-                float den = (1.0f + 2.0f * epsilon_h[i]) * sin4 + cos4 + 2.0f * (1.0f + delta_h[i]) * sin2 * cos2;
-
-                float Sk = 0.0f;
-                if (fabsf(den) > 1e-12f){
-                    Sk = num / den;
-                }
-
-                float factor = (1.0f + 2.0f * epsilon_h[i]) * sin2 + cos2 + Sk;
-
-                if (factor >= 0.0f){
-                    float vqp = vp_h[i] * sqrtf(factor);
-                    vqp_min = std::min(vqp_min, vqp);
-                    vqp_max = std::max(vqp_max, vqp);
-                }
-            }
-        }
-
-        vp_min = vqp_min;
-        vp_max = vqp_max;
+        vp_min = vpfase_min;
+        vp_max = vpfase_max;
 
         float lambda_min = vp_min / pmt->fcut;
         dx_lim = lambda_min / 4.28f;
@@ -350,9 +295,6 @@ void Modeling::checkDispersionAndStability(const float* vp_h, const float* epsil
 
         std::cout<<"info: Maximum epsilon: "<<epsilon_max<<std::endl;
         std::cout<<"info: Maximum delta: "<<delta_max<<std::endl;
-    }
-    else{
-        throw std::invalid_argument("ERROR: Unknown approximation. Choose 'acoustic', 'VTI' or 'TTI'.");
     }
 
     bool dispersion_flag = pmt->dx <= dx_lim && pmt->dz <= dz_lim;
@@ -432,7 +374,7 @@ void Modeling::setModel(){
     delete[] theta_exp_h;
 }
 
-void Modeling::storeSnapshotGPU(const int k){
+void Modeling::saveSnapshot(const int shot,const int k, const float* __restrict__ current){
     if (!pmt->snap){
         return;
     }
@@ -443,57 +385,53 @@ void Modeling::storeSnapshotGPU(const int k){
         return;
     }
 
-    int n_model = pmt->nx * pmt->nz;
-    int n_snaps = pmt->last_save / pmt->step + 1;
-
-    if (snap_idx >= n_snaps){
-        return;
+    const int n_model = pmt->nx*pmt->nz;
+    const float* current_interior = current + pmt->N_abc*pmt->nx_abc+pmt->N_abc;
+    std::string snapshotFile = pmt->snapshotFolder + pmt->approximation + "forward_shot_" + std::to_string(shot + 1) + "Nx" + std::to_string(pmt->nx) + "_Nz" + std::to_string(pmt->nz) + "_Nt" + std::to_string(pmt->nt) + "_frame" + std::to_string(k) + ".bin";
+    cudaMemcpy2D(snapshot,pmt->nx*sizeof(float),current_interior,pmt->nx_abc*sizeof(float),pmt->nx*sizeof(float),pmt->nz,cudaMemcpyDeviceToHost);
+    std::ofstream file(snapshotFile,std::ios::binary);
+    if (!file.is_open()){
+        throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
     }
-
-    int nBlocksSnap = (n_model + nThreads - 1) / nThreads;
-    storeSnapshot<<<nBlocksSnap, nThreads>>>(current, snapshots, snap_idx, pmt->nx, pmt->nz, pmt->nx_abc, pmt->N_abc);
-    snap_idx += 1;
-}
-
-void Modeling::saveSnapshot(const int shot){
-    if (!pmt->snap){
-        return;
-    }
-
-    if (snap_idx == 0){
-        return;
-    }
-
-    int n_model = pmt->nx * pmt->nz;
-
-    for (int i = 0; i < snap_idx; i++){
-        int k = i * pmt->step;
-
-        std::string snapshotFile = pmt->snapshotFolder + pmt->approximation + "forward_shot_" + std::to_string(shot + 1) + "_Nx" + std::to_string(pmt->nx) + "_Nz" + std::to_string(pmt->nz) + "_Nt" + std::to_string(pmt->nt) + "_frame_" + std::to_string(k) + ".bin";
-        exportBin(snapshotFile,snapshots + i * n_model,n_model);
-    }
+    file.write((char*)snapshot,n_model*sizeof(float));
+    std::cout<<"Info: File saved to " + snapshotFile <<std::endl;
+    file.close();
 }
 
 void Modeling::saveSeismogram(const int shot){
     std::ostringstream fcut_stream;
-    fcut_stream << std::fixed << std::setprecision(1) << pmt->fcut;
-    std::string seismogramFile = pmt->seismogramFolder + "seismogram_shot_" + std::to_string(shot + 1) + "_Nt" + std::to_string(pmt->nt_data) + "_Nrec" + std::to_string(pmt->Nrec) + "_fcut" + fcut_stream.str() + ".bin";
-    exportBin(seismogramFile, seismogram, pmt->Nrec * pmt->nt_data);
+    fcut_stream<<std::fixed<<std::setprecision(1)<<pmt->fcut;
+    std::string seismogramFile=pmt->seismogramFolder+"seismogram_shot_"+std::to_string(shot+1)+"_Nt"+std::to_string(pmt->nt_data)+"_Nrec"+std::to_string(pmt->Nrec)+"_fcut"+fcut_stream.str()+".bin";
+
+    const int n_seismogram = pmt->Nrec*pmt->nt_data;
+    float* seismogram_h = new float[n_seismogram];
+
+    cudaMemcpy(seismogram_h,seismogram,n_seismogram*sizeof(float),cudaMemcpyDeviceToHost);
+
+    std::ofstream file(seismogramFile,std::ios::binary);
+    if(!file.is_open()){
+        delete[] seismogram_h;
+        throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
+    }
+
+    file.write((char*)seismogram_h,n_seismogram*sizeof(float));
+    file.close();
+
+    delete[] seismogram_h;
+
+    std::cout<<"Info: File saved to " + seismogramFile<<std::endl;
 }
 
 void Modeling::foward_step(const int k){
     injectSource <<<1, 1>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
     if (pmt->approximation == "acoustic"){
-        updateWaveEquation<<<nBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt);
-        AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
+        updateWaveEquation<<<nBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
-        updateWaveEquationVTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta);
-        AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
+        updateWaveEquationVTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
-        updateWaveEquationTTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta);
-        AbsorbingBoundary<<<nBlocks, nThreads>>>(future, current, pmt->N_abc, pmt->nz_abc, pmt->nx_abc, A);
+        updateWaveEquationTTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
     }
 }
 
@@ -504,33 +442,18 @@ __global__ void injectSource(float* current, const float* source, int k, const i
     }
 }
 
-__global__ void storeSeismogram(const float* current, float* seismogram, const int* rx, const int* rz, int k, int itlag, int nt, int Nrec, int nx_abc){
+__global__ void storeSeismogram(const float* current, float* seismogram, const int* rx, const int* rz, int k, int itlag, int Nrec, int nx_abc){
     int irec = blockIdx.x * blockDim.x + threadIdx.x;
+
     if (irec >= Nrec){
         return;
     }
 
     int it = k - itlag;
-
     seismogram[it * Nrec + irec] = current[rz[irec] * nx_abc + rx[irec]];
 }
 
-__global__ void storeSnapshot(const float* current, float* snapshots,int snap_idx, const int nx, const int nz, const int nx_abc, const int N_abc){
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int n_model = nx * nz;
-
-    if (i >= n_model){
-        return;
-    }
-
-    int iz = i / nx;
-    int ix = i % nx;
-
-    snapshots[snap_idx * n_model + i] = current[(iz + N_abc) * nx_abc + (ix + N_abc)];
-}
-
-__global__ void updateWaveEquation(float* __restrict__ Uf,const float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt){
+__global__ void updateWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc){
     const float c0 = -2.847222222222f;
     const float c1 =  1.6f;
     const float c2 = -0.2f;
@@ -565,10 +488,27 @@ __global__ void updateWaveEquation(float* __restrict__ Uf,const float* __restric
             + c4 * (Uc[i + 4*nx] + Uc[i - 4*nx])) * inv_dz2;
 
         Uf[i] = vp2 * dt2 * (pxx + pzz) + 2.0f * Uc[i] - Uf[i];
+
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
-__global__ void updateWaveEquationVTI(float* __restrict__ Uf,const float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta ){
+__global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc){
     const float c0 = -2.847222222222f;
     const float c1 =  1.6f;
     const float c2 = -0.2f;
@@ -627,10 +567,27 @@ __global__ void updateWaveEquationVTI(float* __restrict__ Uf,const float* __rest
             Sd = num / den;
         }
         Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0f+ 2.0f*epsilon[i]) + Sd) * pxx + vp2 * dt2 *(1.0f + Sd) * pzz;
+
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
-__global__ void updateWaveEquationTTI(float* __restrict__ Uf,const float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta){
+__global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta, float* __restrict__ A, int N_abc){
     const float c0 = -2.847222222222f;
     const float c1 =  1.6f;
     const float c2 = -0.2f;
@@ -690,8 +647,7 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf,const float* __rest
             a4*a1*(Uc[i + nx + 4]     - Uc[i - nx + 4]     + Uc[i - nx - 4]     - Uc[i + nx - 4]) +
             a4*a2*(Uc[i + 2*nx + 4]   - Uc[i - 2*nx + 4]   + Uc[i - 2*nx - 4]   - Uc[i + 2*nx - 4]) +
             a4*a3*(Uc[i + 3*nx + 4]   - Uc[i - 3*nx + 4]   + Uc[i - 3*nx - 4]   - Uc[i + 3*nx - 4]) +
-            a4*a4*(Uc[i + 4*nx + 4]   - Uc[i - 4*nx + 4]   + Uc[i - 4*nx - 4]   - Uc[i + 4*nx - 4])
-        ) * inv_dxdz;
+            a4*a4*(Uc[i + 4*nx + 4]   - Uc[i - 4*nx + 4]   + Uc[i - 4*nx - 4]   - Uc[i + 4*nx - 4])) * inv_dxdz;
 
         float px = (a1 * (Uc[i + 1] - Uc[i - 1]) +
                     a2 * (Uc[i + 2] - Uc[i - 2]) +
@@ -729,65 +685,47 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf,const float* __rest
         }
 
         Uf[i] = 2.0f*Uc[i] - Uf[i] + vp2*dt2*((1.0f + 2.0f*epsilon[i])*c2 + s2 + Sd)*pxx + vp2*dt2*((1.0f + 2.0f*epsilon[i])*s2 + c2 + Sd)*pzz - 2.0f*epsilon[i]*vp2*dt2*sin2th*pxz;
-}
-}
-
-__global__ void AbsorbingBoundary(float* __restrict__ Uf , float* __restrict__ Uc, int N_abc, int nz, int nx, float* __restrict__ A) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_size = nz * nx;
-    if (i >= total_size) return;
-
-    int iz = i / nx;
-    int ix = i % nx;
-
-    if (ix < N_abc){
-        Uf[i] =  Uf[i] * A[ix];
-        Uc[i] =  Uc[i] * A[ix];
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] =  Uf[i] * A[nx - 1 - ix];
-        Uc[i] =  Uc[i] * A[nx - 1 - ix];
-    }
-    if (iz < N_abc){
-        Uf[i] =  Uf[i] * A[iz];
-        Uc[i] =  Uc[i] * A[iz];
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] =  Uf[i] * A[nz - 1 - iz];
-        Uc[i] =  Uc[i] * A[nz - 1 - iz];
+        
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
 void Modeling::solveWaveEquation(){
     initializeFields();
     createWavelet();
-
     if (pmt->ABC == "cerjan"){
         createCerjanVector();
     }
-
     setModel();
-
     for (int shot = 0; shot < pmt->Nshot; shot++){
-
         std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
-
         sx = pmt->sx[shot];
         sz = pmt->sz[shot];
-
         resetFields();
-
         for (int k = 0; k < pmt->nt; k++){
             foward_step(k);
-            if (k >= pmt->itlag){
-                storeSeismogram<<<nBlocksSeis, nThreads>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->nt_data, pmt->Nrec, pmt->nx_abc);
+            if(k>=pmt->itlag){
+                storeSeismogram<<<nBlocksSeis, nThreads>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
-            storeSnapshotGPU(k);
+            saveSnapshot(shot, k, current);
             std::swap(current, future);
         }
-
         saveSeismogram(shot);
-        saveSnapshot(shot);
         std::cout << "info: Wave equation solved" << std::endl;
     }
 }
