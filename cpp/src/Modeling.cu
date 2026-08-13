@@ -38,7 +38,7 @@ void Modeling::initializeFields()
 {
     const int n_model = pmt->nx * pmt->nz;
     const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
-    const int n_seismogram = pmt->Nrec * pmt->nt_data;
+    const int n_seis = pmt->Nrec * pmt->nt_data;
 
     nBlocks = (n_model_exp + nThreads - 1) / nThreads;
     nBlocksSeis = (pmt->Nrec + nThreads - 1) / nThreads;
@@ -62,7 +62,7 @@ void Modeling::initializeFields()
 
     cudaMalloc((void**)&current,n_model_exp * sizeof(float));
     cudaMalloc((void**)&future,n_model_exp * sizeof(float));
-    cudaMalloc((void**)&seismogram,n_seismogram * sizeof(float));
+    cudaMalloc((void**)&seismogram,n_seis * sizeof(float));
 
     if (pmt->snap == true){
         cudaMallocHost((void**)&snapshot,n_model*sizeof(float));
@@ -114,10 +114,10 @@ void Modeling::createCerjanVector(){
 
 void Modeling::resetFields(){
     int n_model_exp = pmt->nx_abc * pmt->nz_abc;
-    const int n_seismogram = pmt->Nrec * pmt->nt_data;
+    const int n_seis = pmt->Nrec * pmt->nt_data;
     cudaMemset(current, 0, n_model_exp * sizeof(float));
     cudaMemset(future, 0, n_model_exp * sizeof(float));
-    cudaMemset(seismogram, 0, n_seismogram * sizeof(float));
+    cudaMemset(seismogram, 0, n_seis * sizeof(float));
 }
 
 void Modeling::expandModel(float* __restrict__ model, float* __restrict__ output){
@@ -403,10 +403,10 @@ void Modeling::saveSeismogram(const int shot){
     fcut_stream<<std::fixed<<std::setprecision(1)<<pmt->fcut;
     std::string seismogramFile=pmt->seismogramFolder+"seismogram_shot_"+std::to_string(shot+1)+"_Nt"+std::to_string(pmt->nt_data)+"_Nrec"+std::to_string(pmt->Nrec)+"_fcut"+fcut_stream.str()+".bin";
 
-    const int n_seismogram = pmt->Nrec*pmt->nt_data;
-    float* seismogram_h = new float[n_seismogram];
+    const int n_seis = pmt->Nrec*pmt->nt_data;
+    float* seismogram_h = new float[n_seis];
 
-    cudaMemcpy(seismogram_h,seismogram,n_seismogram*sizeof(float),cudaMemcpyDeviceToHost);
+    cudaMemcpy(seismogram_h,seismogram,n_seis*sizeof(float),cudaMemcpyDeviceToHost);
 
     std::ofstream file(seismogramFile,std::ios::binary);
     if(!file.is_open()){
@@ -414,7 +414,7 @@ void Modeling::saveSeismogram(const int shot){
         throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
     }
 
-    file.write((char*)seismogram_h,n_seismogram*sizeof(float));
+    file.write((char*)seismogram_h,n_seis*sizeof(float));
     file.close();
 
     delete[] seismogram_h;

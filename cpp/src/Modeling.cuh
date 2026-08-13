@@ -1,6 +1,6 @@
 #pragma once
 #include "Survey.hpp"
-# include <cuda_runtime.h>
+#include <cuda_runtime.h>
 #include <fstream>
 #include <iostream>
 
@@ -9,7 +9,6 @@
 class Modeling 
 {
 public:
-    Survey* pmt;
 
     Modeling(Survey* parameters);
 
