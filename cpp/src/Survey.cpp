@@ -93,7 +93,7 @@ void Survey::readParameters()
     snapshotFolder = parameters["snapshotFolder"].get<std::string>();
     seismogramFolder = parameters["seismogramFolder"].get<std::string>();
     checkpointFolder = parameters["checkpointFolder"].get<std::string>();
-    migratedimageFolder = parameters["migratedimageFolder"].get<std::string>();
+    imageFolder = parameters["imageFolder"].get<std::string>();
     modelFolder = parameters["modelFolder"].get<std::string>();
     estimatedmodelsFolder = parameters["estimatedmodelsFolder"].get<std::string>();
     gradientsFolder = parameters["gradientsFolder"].get<std::string>();

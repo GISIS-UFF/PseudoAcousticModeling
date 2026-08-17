@@ -40,8 +40,8 @@ void Modeling::initializeFields()
     const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
     const int n_seis = pmt->Nrec * pmt->nt_data;
 
-    nBlocks = (n_model_exp + nThreads - 1) / nThreads;
-    nBlocksSeis = (pmt->Nrec + nThreads - 1) / nThreads;
+    expBlocks = (n_model_exp + nThreads - 1) / nThreads;
+    BlocksSeis = (pmt->Nrec + nThreads - 1) / nThreads;
 
     cudaMalloc((void**)&source, pmt->nt * sizeof(float));
 
@@ -422,16 +422,15 @@ void Modeling::saveSeismogram(const int shot){
     std::cout<<"Info: File saved to " + seismogramFile<<std::endl;
 }
 
-void Modeling::foward_step(const int k){
-    injectSource <<<1, 1>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
+void Modeling::forward_step(const int k){
     if (pmt->approximation == "acoustic"){
-        updateWaveEquation<<<nBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        updateWaveEquation<<<expBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
-        updateWaveEquationVTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
+        updateWaveEquationVTI<<<expBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
-        updateWaveEquationTTI<<<nBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
+        updateWaveEquationTTI<<<expBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
     }
 }
 
@@ -706,6 +705,7 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
 }
 
 void Modeling::solveWaveEquation(){
+    std::cout << "info: Solving " pmt->approximation + " wave equation" << std::endl;
     initializeFields();
     createWavelet();
     if (pmt->ABC == "cerjan"){
@@ -718,9 +718,10 @@ void Modeling::solveWaveEquation(){
         sz = pmt->sz[shot];
         resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            foward_step(k);
+            injectSource <<<1, 1>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
+            forward_step(k);
             if(k>=pmt->itlag){
-                storeSeismogram<<<nBlocksSeis, nThreads>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
+                storeSeismogram<<<BlocksSeis, nThreads>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
             saveSnapshot(shot, k, current);
             std::swap(current, future);

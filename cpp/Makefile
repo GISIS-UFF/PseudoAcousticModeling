@@ -1,19 +1,36 @@
-NVCC = /usr/local/cuda-13.3/bin/nvcc
-TARGET = run_modeling
+NVCC=/usr/local/cuda-13.3/bin/nvcc
 
-SOURCES = src/Modeling.cu src/Survey.cpp src/modeling_main.cpp
-HEADERS = $(wildcard include/*.cuh include/*.hpp)
-FLAGS = -std=c++17 -O3 -Iinclude -Xcompiler -fopenmp
+MODELING=run_modeling
+MIGRATION=run_migration
 
-.PHONY: all run clean
+COMMON=src/Modeling.cu src/Survey.cpp
 
-all: $(TARGET)
+MODELING_SRC=$(COMMON) src/modeling_main.cpp
+MIGRATION_SRC=$(COMMON) src/Migration.cu src/migration_main.cpp
 
-$(TARGET): $(SOURCES) $(HEADERS)
-	$(NVCC) $(FLAGS) $(SOURCES) -o $(TARGET)
+HEADERS=$(wildcard include/*.cuh include/*.hpp)
 
-run: $(TARGET)
-	./$(TARGET)
+FLAGS=-std=c++17 -O3 -Iinclude -Xcompiler "-fopenmp -pthread"
+
+.PHONY: all modeling migration run-modeling run-migration clean
+
+all: $(MODELING) $(MIGRATION)
+
+$(MODELING): $(MODELING_SRC) $(HEADERS)
+	$(NVCC) $(FLAGS) $(MODELING_SRC) -o $(MODELING)
+
+$(MIGRATION): $(MIGRATION_SRC) $(HEADERS)
+	$(NVCC) $(FLAGS) $(MIGRATION_SRC) -o $(MIGRATION)
+
+modeling: $(MODELING)
+
+migration: $(MIGRATION)
+
+run-modeling: $(MODELING)
+	./$(MODELING)
+
+run-migration: $(MIGRATION)
+	./$(MIGRATION)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(MODELING) $(MIGRATION)

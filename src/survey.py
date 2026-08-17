@@ -54,7 +54,7 @@ class parameters:
 
         # Folders
         self.seismogramFolder = self.parameters["seismogramFolder"]
-        self.migratedimageFolder = self.parameters["migratedimageFolder"]
+        self.imageFolder = self.parameters["imageFolder"]
         self.snapshotFolder = self.parameters["snapshotFolder"]
         self.modelFolder = self.parameters["modelFolder"]
         self.checkpointFolder = self.parameters["checkpointFolder"]

@@ -105,7 +105,7 @@ public:
     std::string snapshotFolder;
     std::string seismogramFolder;
     std::string checkpointFolder;
-    std::string migratedimageFolder;
+    std::string imageFolder;
     std::string modelFolder;
     std::string estimatedmodelsFolder;
     std::string gradientsFolder;

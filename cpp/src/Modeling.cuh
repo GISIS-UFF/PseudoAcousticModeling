@@ -9,6 +9,7 @@
 class Modeling 
 {
 public:
+    Survey* pmt;
 
     Modeling(Survey* parameters);
 
@@ -33,8 +34,8 @@ public:
     int sx = 0;
     int sz = 0;
 
-    int nBlocks = 0;
-    int nBlocksSeis = 0;
+    int expBlocks = 0;
+    int BlocksSeis = 0;
 
     void freeMemory();
     void initializeFields();
@@ -47,7 +48,7 @@ public:
     void setModel();
     void saveSnapshot(const int shot,const int k, const float* current);
     void saveSeismogram(const int shot);
-    void foward_step(const int k);
+    void forward_step(const int k);
     void solveWaveEquation(); 
 };
 

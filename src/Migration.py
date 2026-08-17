@@ -580,7 +580,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     self.theta_grad.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -706,7 +706,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     self.theta_grad.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -829,7 +829,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     self.theta_grad.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -954,7 +954,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     self.theta_grad.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -1086,7 +1086,7 @@ class migration:
         self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum )
+                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * cp.max(self.ilum) )
                 self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
             if self.pmt.approximation == "TTI":
                 self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
@@ -1106,7 +1106,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     theta_grad_cpu.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
         migrated_imagecpu.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
        
@@ -1258,7 +1258,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     theta_grad_cpu.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
         migrated_imagecpu.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -1405,7 +1405,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     theta_grad_cpu.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
         migrated_imagecpu.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
@@ -1556,7 +1556,7 @@ class migration:
                     theta_outputFile = f"{self.pmt.gradientsFolder}theta_gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
                     theta_grad_cpu.astype(np.float32).tofile(theta_outputFile)
         else:
-            self.outputFile = f"{self.pmt.migratedimageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
+            self.outputFile = f"{self.pmt.imageFolder}migrated_image_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
         migrated_imagecpu.astype(np.float32).tofile(self.outputFile)
         print(f"info: Final image saved to {self.outputFile}")
 
