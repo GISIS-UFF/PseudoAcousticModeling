@@ -8,7 +8,7 @@ shot_file = 5
 shot_idx = shot_file - 1
 shift = 0.1
 window = 0.05
-seismogramFile = (f"../outputs/seismograms/seismogram_shot_5_Nt40001_Nrec100_fcut30.0.bin")
+seismogramFile = (f"/home/processamento/PseudoAcousticModeling/outputs/seismograms/seismogram_shot_5_Nt4001_Nrec100_fcut20.0.bin")
 seismogram = numpy.fromfile(seismogramFile,dtype=numpy.float32).reshape(pmt.nt_data, pmt.Nrec)
 muted_seismogram = Mute(seismogram,shot_idx,pmt.rec_x,pmt.rec_z,pmt.shot_x,pmt.shot_z,pmt.dt,shift,window,v0=1500)
 
@@ -22,7 +22,7 @@ plt.plot(muted_seismogram[:, 25], label="muted")
 plt.legend()
 
 plt.figure()
-plt.imshow(seismogram, aspect="auto", cmap="gray")
-plt.plot(numpy.arange(pmt.Nrec), travel_idx, 'r', linewidth=2, alpha = 0.7)
+plt.imshow(muted_seismogram, aspect="auto", cmap="gray")
+# plt.plot(numpy.arange(pmt.Nrec), travel_idx, 'r', linewidth=2, alpha = 0.7)
 plt.colorbar()
 plt.show()

@@ -2,7 +2,6 @@
 #include "Survey.hpp"
 #include "Modeling.cuh"
 #include <cuda_runtime.h>
-#include <future>
 #include <sstream>
 #include <iomanip>
 
@@ -21,14 +20,14 @@ class Migration{
     float* currentbck=nullptr;
     float* futurebck=nullptr;
 
-    float* current_h[2]={nullptr,nullptr};
-    float* future_h[2]={nullptr,nullptr};
+    float* d_current=nullptr;
+    float* d_future=nullptr;
 
-    cudaEvent_t copy_done[2];
-    std::future<void> writer[2];
-    int checkpoint_count=0;
+    float* h_current=nullptr;
+    float* h_future=nullptr;
 
-    float* seismogram_h=nullptr;
+    float* h_current_next=nullptr;
+    float* h_future_next=nullptr;
 
     float* AUc=nullptr;
     float* BUc=nullptr;
@@ -56,7 +55,7 @@ class Migration{
     void setModel();
 
     void saveCheckpoint(const int k);
-    void importCheckpoint(const int k);
+    void importCheckpoint(const int k, float* current, float* future);
 
     void saveImage();
 

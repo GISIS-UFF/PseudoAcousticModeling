@@ -19,6 +19,8 @@ void Modeling::freeMemory()
     cudaFree(current);
     cudaFree(future);
     cudaFree(seismogram);
+    cudaStreamDestroy(copy_stream);
+    cudaStreamDestroy(compute_stream);
     if (pmt->ABC == "cerjan"){
         cudaFree(A);
     }
@@ -31,6 +33,7 @@ void Modeling::freeMemory()
     }
     if (pmt->snap == true){
         cudaFreeHost(snapshot);
+        cudaFree(d_snapshot);
     }
 }
 
@@ -42,6 +45,9 @@ void Modeling::initializeFields()
 
     expBlocks = (n_model_exp + nThreads - 1) / nThreads;
     BlocksSeis = (pmt->Nrec + nThreads - 1) / nThreads;
+
+    cudaStreamCreate(&copy_stream);
+    cudaStreamCreate(&compute_stream);
 
     cudaMalloc((void**)&source, pmt->nt * sizeof(float));
 
@@ -65,7 +71,8 @@ void Modeling::initializeFields()
     cudaMalloc((void**)&seismogram,n_seis * sizeof(float));
 
     if (pmt->snap == true){
-        cudaMallocHost((void**)&snapshot,n_model*sizeof(float));
+        cudaMallocHost((void**)&snapshot,n_model * sizeof(float));
+        cudaMalloc((void**)&d_snapshot,n_model * sizeof(float));
     }
 
     cudaMalloc((void**)&rx,pmt->Nrec * sizeof(int));
@@ -102,7 +109,7 @@ void Modeling::importBin(std::string path, float* array, int n){
 }
 
 void Modeling::createCerjanVector(){
-    const float sb = 6.0f * pmt->N_abc;
+    const float sb = 3.0f * pmt->N_abc;
     float* A_h = new float[pmt->N_abc]();
     for (int i = 0; i < pmt->N_abc; i++){
         float fb = (pmt->N_abc - i) / (1.4142f * sb);
@@ -374,21 +381,10 @@ void Modeling::setModel(){
     delete[] theta_exp_h;
 }
 
-void Modeling::saveSnapshot(const int shot,const int k, const float* __restrict__ current){
-    if (!pmt->snap){
-        return;
-    }
-    if (k > pmt->last_save){
-        return;
-    }
-    if (k % pmt->step != 0){
-        return;
-    }
-
+void Modeling::saveSnapshot(const int shot,const int k){
     const int n_model = pmt->nx*pmt->nz;
-    const float* current_interior = current + pmt->N_abc*pmt->nx_abc+pmt->N_abc;
     std::string snapshotFile = pmt->snapshotFolder + pmt->approximation + "forward_shot_" + std::to_string(shot + 1) + "Nx" + std::to_string(pmt->nx) + "_Nz" + std::to_string(pmt->nz) + "_Nt" + std::to_string(pmt->nt) + "_frame" + std::to_string(k) + ".bin";
-    cudaMemcpy2D(snapshot,pmt->nx*sizeof(float),current_interior,pmt->nx_abc*sizeof(float),pmt->nx*sizeof(float),pmt->nz,cudaMemcpyDeviceToHost);
+    
     std::ofstream file(snapshotFile,std::ios::binary);
     if (!file.is_open()){
         throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
@@ -424,13 +420,61 @@ void Modeling::saveSeismogram(const int shot){
 
 void Modeling::forward_step(const int k){
     if (pmt->approximation == "acoustic"){
-        updateWaveEquation<<<expBlocks, nThreads>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
-        updateWaveEquationVTI<<<expBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
+        updateWaveEquationVTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
-        updateWaveEquationTTI<<<expBlocks, nThreads>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
+        updateWaveEquationTTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
+    }
+}
+
+void Modeling::solveWaveEquation(){
+    std::cout << "info: Solving " + pmt->approximation + " wave equation" << std::endl;
+    initializeFields();
+    createWavelet();
+    if (pmt->ABC == "cerjan"){
+        createCerjanVector();
+    }
+    setModel();
+    for (int shot = 0; shot < pmt->Nshot; shot++){
+        std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
+        sx = pmt->sx[shot];
+        sz = pmt->sz[shot];
+        resetFields();
+        for (int k = 0; k < pmt->nt; k++){
+            injectSource <<<1, 1, 0, compute_stream>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
+            forward_step(k);
+            if(k>=pmt->itlag){
+                storeSeismogram<<<BlocksSeis, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
+            }
+            if (pmt->snap && k <= pmt->last_save && k % pmt->step == 0)
+            {
+                if (k >= pmt->step)
+                {
+                    cudaStreamSynchronize(copy_stream);
+                    saveSnapshot(shot, k - pmt->step);
+                }
+
+                cudaStreamSynchronize(compute_stream);
+
+                const float* current_interior = current + pmt->N_abc * pmt->nx_abc + pmt->N_abc;
+                cudaMemcpy2DAsync(d_snapshot, pmt->nx * sizeof(float), current_interior, pmt->nx_abc * sizeof(float), pmt->nx * sizeof(float), pmt->nz, cudaMemcpyDeviceToDevice, copy_stream);
+                cudaStreamSynchronize(copy_stream);
+                cudaMemcpyAsync(snapshot,d_snapshot,pmt->nx * pmt->nz * sizeof(float),cudaMemcpyDeviceToHost,copy_stream);
+            }
+            std::swap(current, future);
+        }
+        if (pmt->snap)
+        {
+            cudaStreamSynchronize(copy_stream);
+            saveSnapshot(shot, pmt->last_save);
+        }
+
+        cudaStreamSynchronize(compute_stream);
+        saveSeismogram(shot);
+        std::cout << "info: Wave equation solved" << std::endl;
     }
 }
 
@@ -701,32 +745,5 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
             Uf[i] *= A[nz - 1 - iz];
             Uc[i] *= A[nz - 1 - iz];
         }
-    }
-}
-
-void Modeling::solveWaveEquation(){
-    std::cout << "info: Solving " pmt->approximation + " wave equation" << std::endl;
-    initializeFields();
-    createWavelet();
-    if (pmt->ABC == "cerjan"){
-        createCerjanVector();
-    }
-    setModel();
-    for (int shot = 0; shot < pmt->Nshot; shot++){
-        std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
-        sx = pmt->sx[shot];
-        sz = pmt->sz[shot];
-        resetFields();
-        for (int k = 0; k < pmt->nt; k++){
-            injectSource <<<1, 1>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
-            forward_step(k);
-            if(k>=pmt->itlag){
-                storeSeismogram<<<BlocksSeis, nThreads>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
-            }
-            saveSnapshot(shot, k, current);
-            std::swap(current, future);
-        }
-        saveSeismogram(shot);
-        std::cout << "info: Wave equation solved" << std::endl;
     }
 }

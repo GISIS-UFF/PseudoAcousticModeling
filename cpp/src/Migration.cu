@@ -13,26 +13,26 @@ void Migration::initializeMigrationFields()
     const int n_model = pmt->nx * pmt->nz;
     const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
 
+    expBlocks=(n_model_exp+nThreads-1)/nThreads;
+    seisBlocks=(pmt->Nrec+nThreads-1)/nThreads;
+    nBlocks=(n_model+nThreads-1)/nThreads;
+    
+    cudaStreamCreate(&mdl->copy_stream);
+    cudaStreamCreate(&mdl->compute_stream);
+
     cudaMalloc((void**)&image, n_model * sizeof(float));
     cudaMalloc((void**)&ilum, n_model * sizeof(float));
     cudaMemset(image, 0, n_model * sizeof(float));
     cudaMemset(ilum, 0, n_model * sizeof(float));
     cudaMalloc((void**)&currentbck, n_model_exp * sizeof(float));
     cudaMalloc((void**)&futurebck, n_model_exp * sizeof(float));
-    for(int i=0;i<2;i++){
-        cudaMallocHost((void**)&current_h[i],n_model_exp*sizeof(float));
-        cudaEventCreateWithFlags(&copy_done[i],cudaEventDisableTiming);
-    }
-    
-
-    expBlocks=(n_model_exp+nThreads-1)/nThreads;
-    seisBlocks=(pmt->Nrec+nThreads-1)/nThreads;
-    nBlocks=(n_model+nThreads-1)/nThreads;
-
+    cudaMallocHost((void**)&h_current,n_model_exp*sizeof(float));
+    cudaMalloc((void**)&d_current, n_model_exp * sizeof(float));
+    cudaMallocHost((void**)&h_current_next ,n_model_exp*sizeof(float));
     if (pmt->migration == "checkpoint"){
-        for(int i=0;i<2;i++){
-        cudaMallocHost((void**)&future_h[i],n_model_exp*sizeof(float));
-        }
+        cudaMallocHost((void**)&h_future_next,n_model_exp*sizeof(float));
+        cudaMallocHost((void**)&h_future,n_model_exp*sizeof(float));
+        cudaMalloc((void**)&d_future, n_model_exp * sizeof(float));
     }
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
@@ -41,7 +41,7 @@ void Migration::initializeMigrationFields()
         cudaMalloc((void**)&QCxUc, n_model_exp * sizeof(float));
         cudaMalloc((void**)&QCzUc, n_model_exp * sizeof(float));
         if (pmt->approximation == "TTI"){
-            cudaMalloc((void**)&HUc, n_model_exp * sizeof(float)) ;   
+            cudaMalloc((void**)&HUc, n_model_exp * sizeof(float));   
         }
     }
 }
@@ -51,14 +51,13 @@ void Migration::freeMemory(){
     cudaFree(ilum);
     cudaFree(currentbck);
     cudaFree(futurebck);
-    for(int i=0;i<2;i++){
-        cudaFreeHost(current_h[i]);
-        cudaEventDestroy(copy_done[i]);
-    }
+    cudaFreeHost(h_current);
+    cudaFree(d_current);
+    cudaFreeHost(h_current_next);
     if (pmt->migration == "checkpoint"){
-        for(int i=0;i<2;i++){
-        cudaFreeHost(future_h[i]);
-        }
+        cudaFreeHost(h_future);
+        cudaFreeHost(h_future_next);
+        cudaFree(d_future);
     } 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
         cudaFree(AUc);
@@ -82,10 +81,10 @@ void Migration::Mute(float* seismogram, const int shot)
     #pragma omp parallel for
     for (int irec = 0; irec < pmt->Nrec; irec++)
     {
-        float dz = pmt->rec_z[irec] - pmt->sz[shot];
-        float dx = pmt->rec_x[irec] - pmt->sx[shot];
+        float dz = pmt->rec_z[irec] - pmt->shot_z[shot];
+        float dx = pmt->rec_x[irec] - pmt->shot_x[shot];
 
-        float dist = sqrtf(dx * dx + dz * dz);
+        float dist = sqrtf(dz * dz + dx * dx);
 
         float traveltime = (dist / pmt->v0) + pmt->shift;
 
@@ -110,7 +109,7 @@ void Migration::Mute(float* seismogram, const int shot)
 
 void Migration::loadSeismogram(const int shot){
     int n_seis = pmt->nt_data * pmt->Nrec;
-    seismogram_h = new float[n_seis];
+    float* seismogram_h = new float[n_seis];
 
     std::ostringstream fcut_stream;
     fcut_stream<<std::fixed<<std::setprecision(1)<<pmt->fcut;
@@ -231,15 +230,15 @@ void Migration::smoothModel(float* f,const bool* mask,const bool parameter){
 
 void Migration::backward_step(const int k, float* P){
     if (pmt->approximation == "acoustic"){
-        updateAdjointWaveEquation<<<expBlocks, nThreads>>>(futurebck, currentbck, P, image, ilum, mdl->vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, mdl->A, pmt->N_abc);
+        updateAdjointWaveEquation<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, mdl->vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, mdl->A, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
-        calculateAdjointVTIProducts<<<expBlocks, nThreads>>>(currentbck, P, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta);
-        updateAdjointWaveEquationVTI<<<expBlocks, nThreads>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc,pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
+        calculateAdjointVTIProducts<<<expBlocks, nThreads,0,mdl->compute_stream>>>(currentbck, P, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta);
+        updateAdjointWaveEquationVTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc,pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
-        calculateAdjointTTIProducts<<<expBlocks, nThreads>>>(currentbck, P, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta, mdl->theta);
-        updateAdjointWaveEquationTTI<<<expBlocks, nThreads>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
+        calculateAdjointTTIProducts<<<expBlocks, nThreads,0,mdl->compute_stream>>>(currentbck, P, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta, mdl->theta);
+        updateAdjointWaveEquationTTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
     }
 }
 
@@ -304,44 +303,32 @@ void Migration::setModel(){
 
 void Migration::saveCheckpoint(const int k){
     const int n_model_exp=pmt->nx_abc*pmt->nz_abc;
-    const int slot = checkpoint_count%2;
-    const int bytes = n_model_exp*sizeof(float);
-
-    if(writer[slot].valid()) writer[slot].get();
-
-    cudaMemcpyAsync(current_h[slot],mdl->current,bytes,cudaMemcpyDeviceToHost);
-    cudaMemcpyAsync(future_h[slot],mdl->future,bytes,cudaMemcpyDeviceToHost);
-    cudaEventRecord(copy_done[slot]);
-
+    
     std::string checkpointFile=pmt->checkpointFolder+"checkpoint_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
+    std::ofstream file(checkpointFile,std::ios::binary);
+    if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
 
-    writer[slot]=std::async(std::launch::async,[this,slot,bytes,checkpointFile](){
-        cudaEventSynchronize(copy_done[slot]);
-
-        std::ofstream file(checkpointFile,std::ios::binary);
-        if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
-
-        file.write((char*)current_h[slot],bytes);
-        file.write((char*)future_h[slot],bytes);
-        file.close();
-    });
-
-    checkpoint_count++;
+    file.write((char*)h_current,n_model_exp*sizeof(float));
+    if(pmt->migration == "checkpoint"){
+        file.write((char*)h_future,n_model_exp*sizeof(float));
+    }
+    
+    file.close();
 }
 
-void Migration::importCheckpoint(const int k){
+void Migration::importCheckpoint(const int k, float* current, float* future){
     const int n_model_exp = pmt->nx_abc*pmt->nz_abc;
     std::string checkpointFile = pmt->checkpointFolder+"checkpoint_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
 
     std::ifstream file(checkpointFile,std::ios::binary);
     if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
 
-    file.read((char*)current_h[0],n_model_exp*sizeof(float));
-    file.read((char*)future_h[0],n_model_exp*sizeof(float));
+    file.read((char*)current,n_model_exp*sizeof(float));
+    if (pmt->migration == "checkpoint"){
+        file.read((char*)future,n_model_exp*sizeof(float));
+    }
+    
     file.close();
-
-    cudaMemcpy(mdl->current,current_h[0],n_model_exp*sizeof(float),cudaMemcpyHostToDevice);
-    cudaMemcpy(mdl->future,future_h[0],n_model_exp*sizeof(float),cudaMemcpyHostToDevice);
 }
 
 void Migration::saveImage(){
@@ -367,6 +354,8 @@ void Migration::saveImage(){
 }
 
 void Migration::solveReverseTimeMigrationOntheFly(){
+    std::cout << "info: Solving " + pmt->approximation + " Reverse Time Migration by method " + pmt->migration << std::endl;
+
     initializeMigrationFields();
     mdl->createWavelet();
     if (pmt->ABC == "cerjan"){
@@ -381,24 +370,51 @@ void Migration::solveReverseTimeMigrationOntheFly(){
         resetFields();
         mdl->resetFields();
         loadSeismogram(shot);
+        const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
         for (int k = 0; k < pmt->nt; k++){
-            injectSource <<<1, 1>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
+            injectSource <<<1, 1, 0, mdl->compute_stream>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
             mdl->forward_step(k);
-            if (k%save_step == 0){
-                saveCheckpoint(k);
+            if (k % save_step == 0){
+                if (k >= save_step){
+                    cudaStreamSynchronize(mdl->copy_stream);
+                    saveCheckpoint(k - save_step);
+                }
+
+                cudaStreamSynchronize(mdl->compute_stream);
+                cudaMemcpyAsync(d_current,mdl->current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                cudaStreamSynchronize(mdl->copy_stream);
+                cudaMemcpyAsync(h_current,d_current,n_model_exp * sizeof(float),cudaMemcpyDeviceToHost,mdl->copy_stream);
             }
             std::swap(mdl->current, mdl->future);
         }
+
+        cudaStreamSynchronize(mdl->copy_stream);
+        saveCheckpoint(pmt->last_save);
+        cudaStreamSynchronize(mdl->compute_stream);
+        importCheckpoint(pmt->last_save,h_current,nullptr);
+        cudaMemcpyAsync(mdl->current, h_current, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+        cudaStreamSynchronize(mdl->copy_stream);
         for (int t = pmt->nt - 1; t >= 0; t--){
-            if (t%save_step == 0){
-                importCheckpoint(t);
-            }
             if (t >= pmt->itlag)
             {
                 int it = t - pmt->itlag;
-                injectAdjointSource<<<seisBlocks, nThreads>>>(currentbck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
+                injectAdjointSource<<<seisBlocks, nThreads,0,mdl->compute_stream>>>(currentbck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
             }
-            backward_step(t,mdl->current);
+
+            if (t % save_step == 0){
+                backward_step(t,mdl->current);
+            }
+            if (t%save_step == 0){
+                int next_t = t - save_step;
+                if(next_t >=0){
+                    importCheckpoint(next_t, h_current_next, nullptr);
+                    cudaMemcpyAsync(d_current, h_current_next, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+                    cudaStreamSynchronize(mdl->compute_stream);
+                    cudaStreamSynchronize(mdl->copy_stream);
+                    cudaMemcpyAsync(mdl->current,d_current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                }
+                cudaStreamSynchronize(mdl->copy_stream);
+            }
             std::swap(currentbck, futurebck);
         }
     } 
@@ -409,7 +425,7 @@ void Migration::solveReverseTimeMigrationOntheFly(){
 }
 
 void Migration::solveReverseTimeMigrationCheckpoint(){
-    std::cout << "info: Solving" + pmt->approximation "Reverse Time Migration by method" + pmt->migration << std::endl;
+    std::cout << "info: Solving " + pmt->approximation + " Reverse Time Migration by method " + pmt->migration << std::endl;
     initializeMigrationFields();
     mdl->createWavelet();
     if (pmt->ABC == "cerjan"){
@@ -423,39 +439,63 @@ void Migration::solveReverseTimeMigrationCheckpoint(){
         resetFields();
         mdl->resetFields();
         loadSeismogram(shot);
+        const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
         for (int k = 0; k < pmt->nt; k++){
-            injectSource <<<1, 1>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
+            injectSource <<<1, 1, 0, mdl->compute_stream>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
             mdl->forward_step(k);
-            if (k%pmt->step == 0 || k == pmt->nt - 1){
-                saveCheckpoint(k);
+            if (k % pmt->step == 0){
+                if (k >= pmt->step){
+                    cudaStreamSynchronize(mdl->copy_stream);
+                    saveCheckpoint(k - pmt->step);
+                }
+
+                cudaStreamSynchronize(mdl->compute_stream);
+                cudaMemcpyAsync(d_current,mdl->current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                cudaMemcpyAsync(d_future,mdl->future,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                cudaStreamSynchronize(mdl->copy_stream);
+                cudaMemcpyAsync(h_current,d_current,n_model_exp * sizeof(float),cudaMemcpyDeviceToHost,mdl->copy_stream);
+                cudaMemcpyAsync(h_future,d_future,n_model_exp * sizeof(float),cudaMemcpyDeviceToHost,mdl->copy_stream);
             }
             std::swap(mdl->current, mdl->future);
         }
-        for(int i=0;i<2;i++){
-            if(writer[i].valid()){
-                writer[i].get();
-            }
-        }
+        cudaStreamSynchronize(mdl->copy_stream);
+        saveCheckpoint(pmt->last_save);
+        cudaStreamSynchronize(mdl->compute_stream);
+        importCheckpoint(pmt->last_save,h_current,h_future);
+        cudaMemcpyAsync(mdl->current, h_current, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+        cudaMemcpyAsync(mdl->future, h_future, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+        cudaStreamSynchronize(mdl->copy_stream);
         for (int t = pmt->nt - 1; t >= 0; t--){
-            if (t%pmt->step == 0 || t == pmt->nt - 1){
-                importCheckpoint(t);
-            }
-            if (t >= pmt->itlag)
-            {
+            if (t >= pmt->itlag){
                 int it = t - pmt->itlag;
-                injectAdjointSource<<<seisBlocks, nThreads>>>(currentbck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
-                removeSource <<<1, 1>>>(mdl->current, mdl->source, it, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
+                injectAdjointSource<<<seisBlocks, nThreads, 0, mdl->compute_stream>>>(currentbck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
+                removeSource<<<1, 1>>>(mdl->current, mdl->source, it, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz);
             }
             backward_step(t,mdl->current);
             mdl->forward_step(t);
+            if (t%pmt->step == 0){
+                int next_t = t - pmt->step;
+                if(next_t >=0){
+                    importCheckpoint(next_t, h_current_next, h_future_next);
+                    cudaMemcpyAsync(d_current, h_current_next, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+                    cudaMemcpyAsync(d_future, h_future_next, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
+                    cudaStreamSynchronize(mdl->compute_stream);
+                    cudaStreamSynchronize(mdl->copy_stream);
+                    cudaMemcpyAsync(mdl->current,d_current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                    cudaMemcpyAsync(mdl->future,d_future,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->copy_stream);
+                }
+                cudaStreamSynchronize(mdl->copy_stream);
+            }
             std::swap(mdl->current, mdl->future);
             std::swap(currentbck, futurebck);
         }
-    } 
 
+    cudaStreamSynchronize(mdl->compute_stream);
+    cudaStreamSynchronize(mdl->copy_stream);
     normalizeImage<<<nBlocks, nThreads>>>(image, ilum, pmt->nx, pmt->nz);   
     saveImage();
     std::cout << "info: Reverse Time Migration" << std::endl;
+    }
 }
 
 __global__ void normalizeImage(float* __restrict__ image, const float* __restrict__ ilum, int nx, int nz){

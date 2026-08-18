@@ -27,6 +27,7 @@ public:
     float* seismogram = nullptr;
 
     float* snapshot = nullptr;
+    float* d_snapshot = nullptr;
 
     int* rx = nullptr;
     int* rz = nullptr;
@@ -37,6 +38,9 @@ public:
     int expBlocks = 0;
     int BlocksSeis = 0;
 
+    cudaStream_t copy_stream;
+    cudaStream_t compute_stream;
+
     void freeMemory();
     void initializeFields();
     void createWavelet();
@@ -46,7 +50,7 @@ public:
     void resetFields();
     void checkDispersionAndStability(const float* vp_h, const float* epsilon_h, const float* delta_h, const float* theta_h);
     void setModel();
-    void saveSnapshot(const int shot,const int k, const float* current);
+    void saveSnapshot(const int shot,const int k);
     void saveSeismogram(const int shot);
     void forward_step(const int k);
     void solveWaveEquation(); 
