@@ -256,7 +256,7 @@ class wavefield:
                 print("WARNING: Dispersion or stability conditions not satisfied.")
     
     def createCerjanVector(self):
-        sb = 6. * self.pmt.N_abc
+        sb = 3. * self.pmt.N_abc
         A = np.ones(self.pmt.N_abc)
         for i in range(self.pmt.N_abc):
                 fb = (self.pmt.N_abc - i) / (1.4142 * sb)
