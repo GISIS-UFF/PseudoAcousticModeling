@@ -44,7 +44,7 @@ void Modeling::initializeFields()
     const int n_seis = pmt->Nrec * pmt->nt_data;
 
     expBlocks = (n_model_exp + nThreads - 1) / nThreads;
-    BlocksSeis = (pmt->Nrec + nThreads - 1) / nThreads;
+    seisBlocks = (pmt->Nrec + nThreads - 1) / nThreads;
 
     cudaStreamCreate(&copy_stream);
     cudaStreamCreate(&compute_stream);
@@ -447,7 +447,7 @@ void Modeling::solveWaveEquation(){
             injectSource <<<1, 1, 0, compute_stream>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
             forward_step(k);
             if(k>=pmt->itlag){
-                storeSeismogram<<<BlocksSeis, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
+                storeSeismogram<<<seisBlocks, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
             if (pmt->snap && k <= pmt->last_save && k % pmt->step == 0)
             {

@@ -1,16 +1,16 @@
-NVCC=/usr/local/cuda-13.3/bin/nvcc
+NVCC=/usr/local/cuda-11.8/bin/nvcc
 
 MODELING=run_modeling
 MIGRATION=run_migration
 
-COMMON=src/Modeling.cu src/Survey.cpp
+COMMON=Modeling.cu Survey.cpp
 
-MODELING_SRC=$(COMMON) src/modeling_main.cpp
-MIGRATION_SRC=$(COMMON) src/Migration.cu src/migration_main.cpp
+MODELING_SRC=$(COMMON) modeling_main.cpp
+MIGRATION_SRC=$(COMMON) Migration.cu migration_main.cpp
 
 HEADERS=$(wildcard include/*.cuh include/*.hpp)
 
-FLAGS=-std=c++17 -O3 -Iinclude -Xcompiler "-fopenmp -pthread"
+FLAGS=-std=c++17 -O3 -Iinclude -I$(CONDA_PREFIX)/include -Xcompiler "-fopenmp -pthread"
 
 .PHONY: all modeling migration run-modeling run-migration clean
 

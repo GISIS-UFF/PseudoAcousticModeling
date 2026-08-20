@@ -32,11 +32,11 @@ public:
     int* rx = nullptr;
     int* rz = nullptr;
 
-    int sx = 0;
-    int sz = 0;
+    int sx;
+    int sz;
 
-    int expBlocks = 0;
-    int BlocksSeis = 0;
+    int expBlocks;
+    int seisBlocks;
 
     cudaStream_t copy_stream;
     cudaStream_t compute_stream;
