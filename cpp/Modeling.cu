@@ -86,14 +86,13 @@ void Modeling::createWavelet(){
     float dt = pmt->dt;
     float fcut = pmt->fcut;
     float* source_h = new float[pmt->nt]();
-    float scale = 1.0f / (pmt->dx * pmt->dz);
     float fc = fcut / (3.0f * sqrtf(pi));
     for (int n = 0; n < pmt->nt; n++){
         float td = n*dt - tlag;
 
         float arg = pi*pi*pi*fc*fc*td*td;
 
-        source_h[n] = (1.0f - 2.0f*arg)*expf(-arg)*scale;
+        source_h[n] = (1.0f - 2.0f*arg)*expf(-arg);
     }
     cudaMemcpy(source, source_h, pmt->nt * sizeof(float), cudaMemcpyHostToDevice);
     delete[] source_h;
@@ -109,7 +108,7 @@ void Modeling::importBin(std::string path, float* array, int n){
 }
 
 void Modeling::createCerjanVector(){
-    const float sb = 3.0f * pmt->N_abc;
+    const float sb = 5.0f * pmt->N_abc;
     float* A_h = new float[pmt->N_abc]();
     for (int i = 0; i < pmt->N_abc; i++){
         float fb = (pmt->N_abc - i) / (1.4142f * sb);
@@ -127,7 +126,7 @@ void Modeling::resetFields(){
     cudaMemset(seismogram, 0, n_seis * sizeof(float));
 }
 
-void Modeling::expandModel(float* __restrict__ model, float* __restrict__ output){
+void Modeling::expandModel(const float* __restrict__ model, float* __restrict__ output){
     int N_abc = pmt->N_abc;
     int nx = pmt->nx;
     int nz = pmt->nz;
@@ -444,7 +443,7 @@ void Modeling::solveWaveEquation(){
         sz = pmt->sz[shot];
         resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            injectSource <<<1, 1, 0, compute_stream>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz);
+            injectSource <<<1, 1, 0, compute_stream>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz);
             forward_step(k);
             if(k>=pmt->itlag){
                 storeSeismogram<<<seisBlocks, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
@@ -478,10 +477,11 @@ void Modeling::solveWaveEquation(){
     }
 }
 
-__global__ void injectSource(float* current, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz){
+__global__ void injectSource(float* current, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz, const float dx, const float dz){
     int index = blockIdx.x * blockDim.x + threadIdx.x;
+    float inv_dxdz = 1.0f / (dx * dz);
     if ((index == 0) && (k < nt)){
-        current[sz * nx_abc + sx] += source[k];
+        current[sz * nx_abc + sx] += source[k]*inv_dxdz;
     }
 }
 

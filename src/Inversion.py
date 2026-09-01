@@ -388,7 +388,7 @@ class fwi:
                     s_vp_store.append(s_vp)
                     y_vp_store.append(y_vp)
 
-                if len(s_vp_store) > 8:
+                if len(s_vp_store) > 5:
                     s_vp_store.pop(0)
                     y_vp_store.pop(0)
 
@@ -590,20 +590,20 @@ class fwi:
                         s_theta_store.append(s_theta)
                         y_theta_store.append(y_theta)
 
-                if len(s_vp_store) > 8:
+                if len(s_vp_store) > 5:
                     s_vp_store.pop(0)
                     y_vp_store.pop(0)
 
-                if len(s_eps_store) > 8:
+                if len(s_eps_store) > 5:
                     s_eps_store.pop(0)
                     y_eps_store.pop(0)
 
-                if len(s_delta_store) > 8:
+                if len(s_delta_store) > 5:
                     s_delta_store.pop(0)
                     y_delta_store.pop(0)
 
                 if self.pmt.approximation == "TTI":
-                    if len(s_theta_store) > 8:
+                    if len(s_theta_store) > 5:
                         s_theta_store.pop(0)
                         y_theta_store.pop(0)
 
@@ -875,22 +875,22 @@ class fwi:
                         s_theta_store.append(s_theta)
                         y_theta_store.append(y_theta)
 
-                if len(s_vp_store) > 8:
+                if len(s_vp_store) > 5:
                     s_vp_store.pop(0)
                     y_vp_store.pop(0)
 
                 if progress >= eps_start:
-                    if len(s_eps_store) > 8:
+                    if len(s_eps_store) > 5:
                         s_eps_store.pop(0)
                         y_eps_store.pop(0)
 
                 if progress >= delta_start:
-                    if len(s_delta_store) > 8:
+                    if len(s_delta_store) > 5:
                         s_delta_store.pop(0)
                         y_delta_store.pop(0)
 
                 if self.pmt.approximation == "TTI" and progress >= theta_start:
-                    if len(s_theta_store) > 8:
+                    if len(s_theta_store) > 5:
                         s_theta_store.pop(0)
                         y_theta_store.pop(0)
 
