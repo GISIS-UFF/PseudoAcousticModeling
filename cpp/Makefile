@@ -12,7 +12,7 @@ INVERSION_SRC=$(COMMON) Migration.cu Inversion.cu inversion_main.cpp
 
 HEADERS=$(wildcard include/*.cuh include/*.hpp)
 
-FLAGS=-std=c++17 -O3 -Iinclude -I$(CONDA_PREFIX)/include -Xcompiler "-fopenmp -pthread"
+FLAGS=-std=c++17 -O3 -Iinclude -Xcompiler=-fopenmp
 
 .PHONY: all modeling migration inversion run-modeling run-migration run-inversion clean
 

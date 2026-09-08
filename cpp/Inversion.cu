@@ -16,8 +16,8 @@ void Inversion::InitializeInversionFields(){
     
     XBlocks = (n_seis + nThreads - 1)/nThreads;
 
-    cudaMalloc((void**)&X, sizeof(float));
-    cudaMallocHost((void**)&X_h,sizeof(float));
+    cudaMalloc((void**)&X, sizeof(double));
+    cudaMallocHost((void**)&X_h,sizeof(double));
     cudaMallocHost((void**)&obs_h,n_seis * sizeof(float));
     cudaMallocHost((void**)&obs_buffer,n_seis * sizeof(float));
     cudaMallocHost((void**)&vp_h,n_model * sizeof(float));
@@ -110,9 +110,9 @@ void Inversion::freeMemory(){
     delete[] water_mask;
 }
 
-float Inversion::ObjectiveFunction(){
+double Inversion::ObjectiveFunction(){
     const int n_seis = pmt->Nrec*pmt->nt_data;
-    cudaMemset(X, 0, sizeof(float));
+    cudaMemset(X, 0, sizeof(double));
     slowness2ToVp<<<mdl->expBlocks, nThreads,0,mdl->compute_stream>>>(slowness2,mdl->vp,pmt->nx_abc,pmt->nz_abc);
     readObsSeismogram(0, obs_h);
     cudaMemcpyAsync(residual, obs_h, n_seis * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -145,7 +145,7 @@ float Inversion::ObjectiveFunction(){
         cudaStreamSynchronize(mdl->compute_stream);
     }
 
-    cudaMemcpyAsync(X_h, X, sizeof(float), cudaMemcpyDeviceToHost, mdl->compute_stream);
+    cudaMemcpyAsync(X_h, X, sizeof(double), cudaMemcpyDeviceToHost, mdl->compute_stream);
     cudaStreamSynchronize(mdl->compute_stream);
     std::cout << "info: Wave equation solved" << std::endl;
 
@@ -192,11 +192,11 @@ void Inversion::backward_step(const int k, float* Pc, float* Pp, float* Pf){
     }
 }
 
-float Inversion::calculateGradientOntheFly(){
+double Inversion::calculateGradientOntheFly(){
     std::cout << "info: Solving " + pmt->approximation + " Reverse Time Migration by " + pmt->migration + " method." << std::endl;
     const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
     const int n_seis = pmt->Nrec*pmt->nt_data;
-    cudaMemsetAsync(X, 0, sizeof(float), mdl->compute_stream);
+    cudaMemsetAsync(X, 0, sizeof(double), mdl->compute_stream);
     slowness2ToVp<<<mdl->expBlocks, nThreads, 0, mdl->compute_stream>>>(slowness2, mdl->vp, pmt->nx_abc, pmt->nz_abc);
     readObsSeismogram(0, obs_h);
     cudaMemcpyAsync(residual, obs_h, n_seis * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -257,19 +257,19 @@ float Inversion::calculateGradientOntheFly(){
             normalizeImage<<<mgt->nBlocks,nThreads,0,mdl->compute_stream>>>(theta_grad,mgt->ilum,pmt->nx,pmt->nz);
         }
     }
-    cudaMemcpy(X_h, X, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(X_h, X, sizeof(double), cudaMemcpyDeviceToHost);
     cudaStreamSynchronize(mdl->compute_stream);
     std::cout << "info: Reverse Time Migration" << std::endl;
     return *X_h;
 }
 
-float Inversion::calculateGradientCheckpoint(){
+double Inversion::calculateGradientCheckpoint(){
     std::cout<<"info: Solving "+pmt->approximation+" Reverse Time Migration by "+pmt->migration+" method."<<std::endl;
     const int n_model_exp = pmt->nx_abc*pmt->nz_abc;
     const int n_seis = pmt->Nrec*pmt->nt_data;
     const int last_t = pmt->nt-1;
     const int last_checkpoint = last_t - pmt->step;
-    cudaMemsetAsync(X,0,sizeof(float),mdl->compute_stream);
+    cudaMemsetAsync(X,0,sizeof(double),mdl->compute_stream);
     slowness2ToVp<<<mdl->expBlocks,nThreads,0,mdl->compute_stream>>>(slowness2,mdl->vp,pmt->nx_abc,pmt->nz_abc);
     readObsSeismogram(0, obs_h);
     cudaMemcpyAsync(residual, obs_h, n_seis * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -367,20 +367,19 @@ float Inversion::calculateGradientCheckpoint(){
             normalizeImage<<<mgt->nBlocks,nThreads,0,mdl->compute_stream>>>(theta_grad,mgt->ilum,pmt->nx,pmt->nz);
         }
     }
-    cudaMemcpyAsync(X_h, X, sizeof(float), cudaMemcpyDeviceToHost, mdl->compute_stream);
+    cudaMemcpyAsync(X_h, X, sizeof(double), cudaMemcpyDeviceToHost, mdl->compute_stream);
     cudaStreamSynchronize(mdl->compute_stream);
     std::cout<<"info: Reverse Time Migration"<<std::endl;
 
     return *X_h;
 }
 
-double Inversion::dot(const float* a, const float* b){
+double Inversion::dot(const float* a,const float* b){
     double result = 0.0;
-    const int n_model = pmt->nx * pmt->nz;
-
+    const int n_model = pmt->nx*pmt->nz;
     #pragma omp parallel for reduction(+:result)
     for(int i = 0; i < n_model; i++){
-        result += a[i]*b[i];
+        result += static_cast<double>(a[i]) * static_cast<double>(b[i]);
     }
 
     return result;
@@ -507,7 +506,7 @@ void Inversion::ExpandModelDevice(const std::string& parameter, const float* mod
     delete[] model_exp;
 }
 
-float Inversion::calculateGradient(const std::string& parameter, float* gradient){
+double Inversion::calculateGradient(const std::string& parameter, float* gradient){
     const bool multiparameter = pmt->multiparameter;
     const float* gradient_device = nullptr;
     if(parameter == "vp"){
@@ -530,7 +529,7 @@ float Inversion::calculateGradient(const std::string& parameter, float* gradient
         throw std::runtime_error("Info: Invalid gradient parameter: " + parameter);
     }
 
-    float X_current = 0.0f;
+    double X_current = 0.0f;
 
     if(pmt->migration == "onthefly"){
         X_current = calculateGradientOntheFly();
@@ -557,12 +556,12 @@ float Inversion::calculateGradient(const std::string& parameter, float* gradient
     return X_current;
 }
 
-float Inversion::calculateMultiparameterGradient(const bool update_eps, const bool update_delta, const bool update_theta, float* gradient_vp, float* gradient_eps, float* gradient_delta, float* gradient_theta){
+double Inversion::calculateMultiparameterGradient(const bool update_eps, const bool update_delta, const bool update_theta, float* gradient_vp, float* gradient_eps, float* gradient_delta, float* gradient_theta){
     const bool multiparameter = pmt->multiparameter;
     const int n_model = pmt->nx * pmt->nz;
     pmt->multiparameter = update_eps || update_delta || update_theta;
 
-    float X_current = 0.0f;
+    double X_current = 0.0;
 
     if(pmt->migration == "onthefly"){
         X_current = calculateGradientOntheFly();
@@ -607,7 +606,9 @@ float Inversion::calculateMultiparameterGradient(const bool update_eps, const bo
     return X_current;
 }
 
-float Inversion::armijolinesearch(const std::string& parameter, const float* model0, const float* grad0, const float* p, const float X0, const bool empty, const float scale){
+float Inversion::armijolinesearch(const std::string& parameter, const float* model0, const float* grad0, const float* p, const double X0, const bool empty, const float scale){
+    std::cout << "Info: Starting Armijo line search for parameter " << parameter << std::endl;
+    
     float model_min = 0.0f;
     float model_max = 0.0f;
     float beta;
@@ -632,10 +633,10 @@ float Inversion::armijolinesearch(const std::string& parameter, const float* mod
         throw std::runtime_error("Info: Invalid inversion parameter: " + parameter);
     }
 
-    constexpr double c1 = 1.0e-4;
-    constexpr int max_iters = 10;
+    const double c1 = 1.0e-4;
+    const int max_iters = 10;
 
-    const float gp0 = scale * dot(grad0,p);
+    const double gp0 = static_cast<double>(scale) * dot(grad0,p);
     if(gp0 >= 0.0 || !std::isfinite(gp0)){
         throw std::runtime_error("Info: Armijo needs a descent direction.");
     }
@@ -653,7 +654,7 @@ float Inversion::armijolinesearch(const std::string& parameter, const float* mod
         applyModelStep(parameter,model0,p,model_i,beta);
         ExpandModelDevice(parameter,model_i);
 
-        const float X_i = ObjectiveFunction();
+        const double X_i = ObjectiveFunction();
         const double armijo_limit = X0 + c1*beta*gp0;
 
         std::cout << "Armijo " << parameter << std::endl
@@ -677,7 +678,9 @@ float Inversion::armijolinesearch(const std::string& parameter, const float* mod
     return 0.0f;
 }
 
-float Inversion::linesearch(const std::string& parameter, const float* model0, const float* grad0, const float* p, const float X0, float& X_new, float* grad_new, const bool empty, const float scale){
+float Inversion::linesearch(const std::string& parameter, const float* model0, const float* grad0, const float* p, const double X0, double& X_new, float* grad_new, const bool empty, const float scale){
+    std::cout << "Info: Starting Strong Wolfe with zoom line search for parameter " << parameter << std::endl;
+
     const int n_model = pmt->nx*pmt->nz;
     float model_min = 0.0f;
     float model_max = 0.0f;
@@ -699,10 +702,10 @@ float Inversion::linesearch(const std::string& parameter, const float* model0, c
         model_max = pmt->thetamax;
     }
 
-    const float c1 = 1.0e-4f;
-    const float c2 = 0.9f;
+    const double c1 = 1.0e-4;
+    const double c2 = 0.9;
     const int max_iters = 10;
-    const float gp0 = scale * dot(grad0,p);
+    const double gp0 = static_cast<double>(scale) * dot(grad0,p);
 
     if(gp0 >= 0.0 || !std::isfinite(gp0)){
         throw std::runtime_error("Info: Strong Wolfe needs a descent direction: g^T p < 0.");
@@ -721,7 +724,7 @@ float Inversion::linesearch(const std::string& parameter, const float* model0, c
     }
     
     float alpha_past = 0.0f;
-    float X_past = X0;
+    double X_past = X0;
 
     float* model_i = new float[n_model];
     float* grad_i = new float[n_model];
@@ -729,16 +732,16 @@ float Inversion::linesearch(const std::string& parameter, const float* model0, c
     for(int i = 0; i < max_iters; i++){
         applyModelStep(parameter,model0,p,model_i,alpha_i);
         ExpandModelDevice(parameter,model_i);
-        float X_i = ObjectiveFunction();
+        double X_i = ObjectiveFunction();
 
         std::cout << "parameter = " << parameter << std::endl;
         std::cout << "alpha = " << alpha_i << std::endl;
         std::cout << "X = " << X0 << std::endl;
         std::cout << "X_new = " << X_i << std::endl;
         std::cout << "gTp0 = " << gp0 << std::endl;
+        std::cout << "Armijo limit = " << (X0 + c1*alpha_i*gp0) << std::endl;
 
         if((X_i > X0 + c1*alpha_i*gp0) || (i > 0 && X_i >= X_past)){
-            std::cout << "Armijo limit = " << (X0 + c1*alpha_i*gp0) << std::endl;
             const float alpha = zoom(parameter,model0,grad0,p,X0,gp0,alpha_past,alpha_i, X_past, X_new, grad_new, scale);
             delete[] model_i;
             delete[] grad_i;
@@ -747,7 +750,7 @@ float Inversion::linesearch(const std::string& parameter, const float* model0, c
 
         X_i = calculateGradient(parameter,grad_i);
         scaleGradient(grad_i, scale);
-        const float gpi = scale * dot(grad_i,p);
+        const double gpi = static_cast<double>(scale) * dot(grad_i,p);
         std::cout << "gTp = " << gpi << std::endl;
         std::cout << "Curvature limit = " << -c2 * gp0 << std::endl;
 
@@ -783,18 +786,18 @@ float Inversion::linesearch(const std::string& parameter, const float* model0, c
     return 0.0f;
 }
 
-float Inversion::zoom(const std::string& parameter,const float* model0, const float* grad0, const float* p, const float X0, const double gp0, float alpha_lo, float alpha_hi,const float X_lo_initial, float& X_new, float* grad_new, const float scale)
-{
-    const int n_model = pmt->nx*pmt->nz;
+float Inversion::zoom(const std::string& parameter,const float* model0, const float* grad0, const float* p, const double X0, const double gp0, float alpha_lo, float alpha_hi,const double X_lo_initial, double& X_new, float* grad_new, const float scale){
+    std::cout << "Info: Starting zoom for parameter " << parameter << std::endl;
 
-    const float c1 = 1.0e-4f;
-    const float c2 = 0.9f;
+    const int n_model = pmt->nx*pmt->nz;
+    const double c1 = 1.0e-4;
+    const double c2 = 0.9;
     const int max_iters = 10;
 
     float* model_i = new float[n_model];
     float* grad_i = new float[n_model];
 
-    float X_lo = X_lo_initial;
+    double X_lo = X_lo_initial;
     float alpha_i;
 
     for(int i = 0; i < max_iters; i++){
@@ -803,7 +806,7 @@ float Inversion::zoom(const std::string& parameter,const float* model0, const fl
 
         applyModelStep(parameter,model0,p,model_i,alpha_i);
         ExpandModelDevice(parameter,model_i);
-        float X_i = ObjectiveFunction();
+        double X_i = ObjectiveFunction();
 
         std::cout << "alpha_lo = " << alpha_lo << std::endl;
         std::cout << "alpha_hi = " << alpha_hi << std::endl;
@@ -815,13 +818,12 @@ float Inversion::zoom(const std::string& parameter,const float* model0, const fl
         if(X_i > X0 + c1*alpha_i*gp0 || X_i >= X_lo){
             alpha_hi = alpha_i;
         }
-
         else{
 
             X_i = calculateGradient(parameter,grad_i);
             scaleGradient(grad_i, scale);
 
-            const float gpi = scale * dot(grad_i, p);
+            const double gpi = static_cast<double>(scale) * dot(grad_i, p);
 
             std::cout << "gTp = " << gpi << std::endl;
             std::cout << "Curvature limit = " << -c2 * gp0 << std::endl;
@@ -859,9 +861,9 @@ float Inversion::zoom(const std::string& parameter,const float* model0, const fl
 
 float Inversion::linesearchMultiparameter(const float* vp, const float* epsilon, const float* delta, const float* theta, const float* p_vp, const float* p_eps, const float* p_delta, const float* p_theta,
 const float* g_vp, const float* g_eps, const float* g_delta, const float* g_theta, const float beta_vp, const float beta_eps, const float beta_delta, const float beta_theta, const float scale_vp, const float scale_eps, const float scale_delta, const float scale_theta,
-const bool update_eps, const bool update_delta, const bool update_theta, const float X0){
-    
-    const float c1 = 1.0e-4;
+const bool update_eps, const bool update_delta, const bool update_theta, const double X0){
+    std::cout << "Info: Starting multiparameter line search " << std::endl;
+    const double c1 = 1.0e-4;
     const int max_iters = 10;
 
     const int n_model = pmt->nx * pmt->nz;
@@ -875,7 +877,7 @@ const bool update_eps, const bool update_delta, const bool update_theta, const f
         theta_i = new float[n_model];
     }
 
-    float gp0 = beta_vp * scale_vp * dot(g_vp, p_vp);
+    double gp0 = static_cast<double>(beta_vp) * static_cast<double>(scale_vp) * dot(g_vp, p_vp);
 
     if(update_eps){
         gp0 += beta_eps * scale_eps * dot(g_eps, p_eps);
@@ -915,7 +917,7 @@ const bool update_eps, const bool update_delta, const bool update_theta, const f
             ExpandModelDevice("theta", theta_i);
         }
 
-        const float X_i = ObjectiveFunction();
+        const double X_i = ObjectiveFunction();
 
         const double armijo_limit = X0 + c1 * alpha * gp0;
 
@@ -988,10 +990,10 @@ void Inversion::adjustfmax(const float fmax){
     pmt->tlag = 2.0f*std::sqrt(pi)/pmt->fcut;
     pmt->itlag = static_cast<int>(pmt->tlag/pmt->dt);
     pmt->nt = pmt->itlag + pmt->nt_data;
-    cudaMalloc((void**)&mdl->source, pmt->nt * sizeof(float));
+    cudaMemset((void**)&mdl->source, 0, pmt->nt * sizeof(float));
     mdl->createWavelet();
     if (pmt->migration == "onthefly"){
-        cudaMalloc((void**)&mgt->savefield,pmt->nt*n_model_exp*sizeof(float));
+        cudaMemset((void**)&mgt->savefield, 0, pmt->nt * n_model_exp * sizeof(float));
     }
 }
 
@@ -1127,12 +1129,12 @@ void Inversion::solveFullWaveformInversionMonoparameter(){
         s_vp_store.clear();
         y_vp_store.clear();
 
-        float X_current = calculateGradient("vp",grad_vp_h);
+        double X_current = calculateGradient("vp",grad_vp_h);
 
         const float gmax0 = getGradientScale(grad_vp_h);
         scaleGradient(grad_vp_h, gmax0);
 
-        const float X_freq0 = X_current;
+        const double X_freq0 = X_current;
         history_stream << X_current/X_freq0 << " " << fmax << std::endl;
 
         for(int itr = 0; itr < pmt->niter; itr++){
@@ -1144,7 +1146,7 @@ void Inversion::solveFullWaveformInversionMonoparameter(){
 
             twoLoopRecursion(grad_vp_h,p_vp,s_vp_store,y_vp_store);
 
-            float X_new;
+            double X_new;
             const bool empty = s_vp_store.empty();
             const float alpha_vp = linesearch("vp",vp_h,grad_vp_h,p_vp,X_current, X_new, grad_vpnew_h,empty, gmax0);
 
@@ -1186,13 +1188,13 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
     }
 
     const int n_model = pmt->nx*pmt->nz;
-    const float eps_start = 0.50f;
-    const float delta_start = 0.70f;
+    const float eps_start = 0.5f;
+    const float delta_start = 0.75f;
     const float theta_start = 0.85f;
 
-    const int eps_first_itr = static_cast<int>(std::ceil(eps_start*pmt->niter));
-    const int delta_first_itr = static_cast<int>(std::ceil(delta_start*pmt->niter));
-    const int theta_first_itr = static_cast<int>(std::ceil(theta_start*pmt->niter));
+    const int eps_first_itr = 1 + static_cast<int>(std::ceil(eps_start*(pmt->niter - 1)));
+    const int delta_first_itr = 1 + static_cast<int>(std::ceil(delta_start*(pmt->niter - 1)));
+    const int theta_first_itr = 1 + static_cast<int>(std::ceil(theta_start*(pmt->niter - 1)));
 
     setModel();
 
@@ -1222,7 +1224,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         s_theta_store.clear();
         y_theta_store.clear();
 
-        float X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
+        double X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
 
         const float g_vp_max0 = getGradientScale(grad_vp_h);
         scaleGradient(grad_vp_h,g_vp_max0);
@@ -1231,7 +1233,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         float g_delta_max0 = 1.0f;
         float g_theta_max0 = 1.0f;
 
-        const float X_freq0 = X_current;
+        const double X_freq0 = X_current;
 
         history_stream << X_current/X_freq0 << " " << fmax << std::endl;
 
@@ -1368,7 +1370,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
                 ExpandModelDevice("theta",thetanew_h);
             }
 
-            const float X_new = calculateMultiparameterGradient(update_eps,update_delta,update_theta,grad_vpnew_h,grad_epsnew_h,grad_deltanew_h,grad_thetanew_h);
+            const double X_new = calculateMultiparameterGradient(update_eps,update_delta,update_theta,grad_vpnew_h,grad_epsnew_h,grad_deltanew_h,grad_thetanew_h);
 
             scaleGradient(grad_vpnew_h,g_vp_max0);
 
@@ -1451,14 +1453,14 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
     std::cout << "info: FWI history saved to " << history_file << std::endl;
 }
 
-__global__ void computeObjectiveFunction(float* X, float* __restrict__ residual, const float* __restrict__ calculated,const int nt, const int Nrec){
+__global__ void computeObjectiveFunction(double* X, float* __restrict__ residual, const float* __restrict__ calculated,const int nt, const int Nrec){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int n_seis = nt * Nrec;
 
     if (i < n_seis){
-        float r = residual[i] - calculated[i];
+        const float r = residual[i] - calculated[i];
         residual[i] = r;
-        atomicAdd(X, 0.5f * r * r);
+        atomicAdd(X, 0.5f * static_cast<double>(r) * static_cast<double>(r));
     }
 }
 
@@ -1582,24 +1584,24 @@ const int nx, const int nz, const int N_abc, const bool multiparameter){
         return;
     }
 
-    const float pxx =(c0 * Pc[i]
+    const double pxx =(c0 * Pc[i]
             + c1 * (Pc[i + 1] + Pc[i - 1])
             + c2 * (Pc[i + 2] + Pc[i - 2])
             + c3 * (Pc[i + 3] + Pc[i - 3])
             + c4 * (Pc[i + 4] + Pc[i - 4])) * inv_dx2;
 
-    const float pzz =(c0 * Pc[i]
+    const double pzz =(c0 * Pc[i]
             + c1 * (Pc[i + nx] + Pc[i - nx])
             + c2 * (Pc[i + 2 * nx] + Pc[i - 2 * nx])
             + c3 * (Pc[i + 3 * nx] + Pc[i - 3 * nx])
             + c4 * (Pc[i + 4 * nx] + Pc[i - 4 * nx])) * inv_dz2;
 
-    const float px =(a1 * (Pc[i + 1] - Pc[i - 1])
+    const double px =(a1 * (Pc[i + 1] - Pc[i - 1])
             + a2 * (Pc[i + 2] - Pc[i - 2])
             + a3 * (Pc[i + 3] - Pc[i - 3])
             + a4 * (Pc[i + 4] - Pc[i - 4])) * inv_dx;
 
-    const float pz =(a1 * (Pc[i + nx] - Pc[i - nx])
+    const double pz =(a1 * (Pc[i + nx] - Pc[i - nx])
             + a2 * (Pc[i + 2*nx] - Pc[i - 2*nx])
             + a3 * (Pc[i + 3*nx] - Pc[i - 3*nx])
             + a4 * (Pc[i + 4*nx] - Pc[i - 4*nx])) * inv_dz;
@@ -1607,74 +1609,70 @@ const int nx, const int nz, const int N_abc, const bool multiparameter){
     const float eps = epsilon[i];
     const float del = delta[i];
 
-    const float px2 = px * px;
-    const float pz2 = pz * pz;
+    const double px2 = px * px;
+    const double pz2 = pz * pz;
 
-    const float px4 = px2 * px2;
-    const float pz4 = pz2 * pz2;
+    const double px4 = px2 * px2;
+    const double pz4 = pz2 * pz2;
 
-    const float px2pz2 = px2 * pz2;
+    const double px2pz2 = px2 * pz2;
 
-    const float num = -2.0f * (eps - del) * px2pz2;
-    const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
+    const double num = -2.0f * (eps - del) * px2pz2;
+    const double den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
 
-    float Sd = 0.0f;
-    float Cx = 0.0f;
-    float Cz = 0.0f;
-    float dSd_deps   = 0.0f;
-    float dSd_ddelta = 0.0f;
+    double Sd = 0.0f;
+    double Cx = 0.0f;
+    double Cz = 0.0f;
+    double dSd_deps   = 0.0f;
+    double dSd_ddelta = 0.0f;
 
-    if (fabsf(den) > 1.0e-12f)
-    {
-        const float inv_den = 1.0f / den;
-        const float inv_den2 = inv_den * inv_den;
+    if(std::abs(den) > 1.0e-25){
+        const double inv_den = 1.0f / den;
+        const double inv_den2 = inv_den * inv_den;
         Sd = num * inv_den;
 
-        const float factor = 4.0f * (eps - del) * ((1.0f + 2.0f * eps) * px4 - pz4 ) * inv_den2;
+        const double factor = 4.0f * (eps - del) * ((1.0f + 2.0f * eps) * px4 - pz4 ) * inv_den2;
     
         Cx = factor * px * pz2;
         Cz = -factor * px2 * pz;
 
-        if (multiparameter)
-        {
-            const float dnum_deps = -2.0f * px2pz2;
-            const float dnum_ddelta = 2.0f * px2pz2;
-            const float dden_deps = 2.0f * px4;
-            const float dden_ddelta = 2.0f * px2pz2;
+        if(multiparameter){
+            const double dnum_deps = -2.0f * px2pz2;
+            const double dnum_ddelta = 2.0f * px2pz2;
+            const double dden_deps = 2.0f * px4;
+            const double dden_ddelta = 2.0f * px2pz2;
             dSd_deps = (dnum_deps * den - num * dden_deps) * inv_den2;
             dSd_ddelta = (dnum_ddelta * den - num * dden_ddelta) * inv_den2;
         }
     }
 
-    const float A = 1.0f + 2.0f * eps + Sd;
-    const float B = 1.0f + Sd;
-    const float Q = pxx + pzz;
-    const float adj = Uc[i];
+    const double A = 1.0f + 2.0f * eps + Sd;
+    const double B = 1.0f + Sd;
+    const double Q = pxx + pzz;
+    const double adj = Uc[i];
     AUc[i] = A * adj;
     BUc[i] = B * adj;
     QCxUc[i] = Q * Cx * adj;
     QCzUc[i] = Q * Cz * adj;
 
-    if (ix >= N_abc && ix < nx - N_abc && iz >= N_abc && iz < nz - N_abc)
-    {
+    if (ix >= N_abc && ix < nx - N_abc && iz >= N_abc && iz < nz - N_abc){
         const int xf = ix - N_abc;
         const int zf = iz - N_abc;
 
         const int nxf = nx - 2 * N_abc;
         const int idx = zf * nxf + xf;
 
-        const float d2Pdt2 =(Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
+        const double d2Pdt2 =(Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
         ilum[idx] += Pc[i] * Pc[i];
         vp_grad[idx] += adj * d2Pdt2;
 
         if (multiparameter){
-            const float dP_deps = (-2.0f - dSd_deps) * pxx - dSd_deps * pzz;
-            const float dP_ddelta = -dSd_ddelta * Q;
+            const double dP_deps = (-2.0f - dSd_deps) * pxx - dSd_deps * pzz;
+            const double dP_ddelta = -dSd_ddelta * Q;
 
             eps_grad[idx] += adj * dP_deps;
             delta_grad[idx] += adj * dP_ddelta;
         }
-        
     }
 }
 
@@ -1794,24 +1792,24 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
         return;
     }
 
-    const float pxx =(c0 * Pc[i]
+    const double pxx =(c0 * Pc[i]
             + c1 * (Pc[i + 1] + Pc[i - 1])
             + c2 * (Pc[i + 2] + Pc[i - 2])
             + c3 * (Pc[i + 3] + Pc[i - 3])
             + c4 * (Pc[i + 4] + Pc[i - 4])) * inv_dx2;
 
-    const float pzz =(c0 * Pc[i]
+    const double pzz =(c0 * Pc[i]
             + c1 * (Pc[i + nx] + Pc[i - nx])
             + c2 * (Pc[i + 2 * nx] + Pc[i - 2 * nx])
             + c3 * (Pc[i + 3 * nx] + Pc[i - 3 * nx])
             + c4 * (Pc[i + 4 * nx] + Pc[i - 4 * nx])) * inv_dz2;
 
-    const float px =(a1 * (Pc[i + 1] - Pc[i - 1])
+    const double px =(a1 * (Pc[i + 1] - Pc[i - 1])
             + a2 * (Pc[i + 2] - Pc[i - 2])
             + a3 * (Pc[i + 3] - Pc[i - 3])
             + a4 * (Pc[i + 4] - Pc[i - 4])) * inv_dx;
 
-    const float pz =(a1 * (Pc[i + nx] - Pc[i - nx])
+    const double pz =(a1 * (Pc[i + nx] - Pc[i - nx])
             + a2 * (Pc[i + 2*nx] - Pc[i - 2*nx])
             + a3 * (Pc[i + 3*nx] - Pc[i - 3*nx])
             + a4 * (Pc[i + 4*nx] - Pc[i - 4*nx])) * inv_dz;
@@ -1826,45 +1824,44 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
 
     sincosf(th, &s, &c);
 
-    const float xi = px * c - pz * s;
-    const float eta = px * s + pz * c;
-    const float xi2 = xi * xi;
-    const float eta2 = eta * eta;
-    const float xi4 = xi2 * xi2;
-    const float eta4 = eta2 * eta2;
-    const float xi2eta2 = xi2 * eta2;
+    const double xi = px * c - pz * s;
+    const double eta = px * s + pz * c;
+    const double xi2 = xi * xi;
+    const double eta2 = eta * eta;
+    const double xi4 = xi2 * xi2;
+    const double eta4 = eta2 * eta2;
+    const double xi2eta2 = xi2 * eta2;
 
-    const float num = -2.0f * (eps - del) * xi2eta2;
-    const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2eta2;
+    const double num = -2.0f * (eps - del) * xi2eta2;
+    const double den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2eta2;
 
-    float Sd = 0.0f;
-    float Cx = 0.0f;
-    float Cz = 0.0f;
-    float dSd_deps   = 0.0f;
-    float dSd_ddelta = 0.0f;
-    float dSd_dtheta = 0.0f;
+    double Sd = 0.0f;
+    double Cx = 0.0f;
+    double Cz = 0.0f;
+    double dSd_deps   = 0.0f;
+    double dSd_ddelta = 0.0f;
+    double dSd_dtheta = 0.0f;
 
 
-    if (fabsf(den) > 1.0e-12f)
-    {
-        const float inv_den = 1.0f / den;
-        const float inv_den2 = inv_den * inv_den;
+    if(std::abs(den) > 1.0e-25){
+        const double inv_den = 1.0f / den;
+        const double inv_den2 = inv_den * inv_den;
         Sd = num * inv_den;
 
-        const float K = (1.0f + 2.0f * eps) * xi4 - eta4;
-        const float factor = 4.0f * (eps - del) * xi * eta * K * inv_den2;
+        const double K = (1.0f + 2.0f * eps) * xi4 - eta4;
+        const double factor = 4.0f * (eps - del) * xi * eta * K * inv_den2;
 
         Cx = factor * pz;
         Cz = -factor * px;
 
         if (multiparameter)
         {
-            const float dnum_deps = -2.0f * xi2eta2;
-            const float dnum_ddelta =  2.0f * xi2eta2;
-            const float dden_deps =  2.0f * xi4;
-            const float dden_ddelta =  2.0f * xi2eta2;
-            const float dnum_dtheta = -2.0f * (eps - del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
-            const float dden_dtheta = -4.0f * (1.0f + 2.0f * eps) * xi * xi * xi * eta + 4.0f * xi * eta * eta * eta + 2.0f * (1.0f + del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
+            const double dnum_deps = -2.0f * xi2eta2;
+            const double dnum_ddelta =  2.0f * xi2eta2;
+            const double dden_deps =  2.0f * xi4;
+            const double dden_ddelta =  2.0f * xi2eta2;
+            const double dnum_dtheta = -2.0f * (eps - del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
+            const double dden_dtheta = -4.0f * (1.0f + 2.0f * eps) * xi * xi * xi * eta + 4.0f * xi * eta * eta * eta + 2.0f * (1.0f + del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
 
             dSd_deps = (dnum_deps * den - num * dden_deps) * inv_den2;
             dSd_ddelta = (dnum_ddelta * den - num * dden_ddelta) * inv_den2;
@@ -1877,11 +1874,11 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
     const float sin2th = 2.0f * s * c;
     const float cos2th = cos2 - sin2;
 
-    const float Acoef = (1.0f + 2.0f * eps) * cos2 + sin2 + Sd;
-    const float Bcoef = (1.0f + 2.0f * eps) * sin2 + cos2 + Sd;
-    const float Hcoef = 2.0f * eps * sin2th;
-    const float Q = pxx + pzz;
-    const float adj = Uc[i];
+    const double Acoef = (1.0f + 2.0f * eps) * cos2 + sin2 + Sd;
+    const double Bcoef = (1.0f + 2.0f * eps) * sin2 + cos2 + Sd;
+    const double Hcoef = 2.0f * eps * sin2th;
+    const double Q = pxx + pzz;
+    const double adj = Uc[i];
     AUc[i] = Acoef * adj;
     BUc[i] = Bcoef * adj;
     HUc[i] = Hcoef * adj;
@@ -1895,13 +1892,13 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
         const int nxf = nx - 2 * N_abc;
         const int idx = zf * nxf + xf;
 
-        const float d2Pdt2 = (Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
+        const double d2Pdt2 = (Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
         ilum[idx] += Pc[i] * Pc[i];
         vp_grad[idx] += adj * d2Pdt2;
 
         if (multiparameter)
         {
-            const float pxz = (
+            const double pxz = (
             a1*a1*(Pc[i + nx + 1]     - Pc[i - nx + 1]     + Pc[i - nx - 1]     - Pc[i + nx - 1]) +
             a1*a2*(Pc[i + 2*nx + 1]   - Pc[i - 2*nx + 1]   + Pc[i - 2*nx - 1]   - Pc[i + 2*nx - 1]) +
             a1*a3*(Pc[i + 3*nx + 1]   - Pc[i - 3*nx + 1]   + Pc[i - 3*nx - 1]   - Pc[i + 3*nx - 1]) +
@@ -1923,12 +1920,12 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
             a4*a4*(Pc[i + 4*nx + 4]   - Pc[i - 4*nx + 4]   + Pc[i - 4*nx - 4]   - Pc[i + 4*nx - 4])) * inv_dxdz;
 
 
-            const float dA_dtheta = 2.0f * eps * sin2th - dSd_dtheta;
-            const float dB_dtheta = -2.0f * eps * sin2th - dSd_dtheta;
-            const float dC_dtheta = 4.0f * eps * cos2th;
-            const float dP_deps = -(2.0f * cos2 + dSd_deps) * pxx-(2.0f * sin2 + dSd_deps) * pzz + 2.0f * sin2th * pxz;
-            const float dP_ddelta = -dSd_ddelta * Q;
-            const float dP_dtheta = dA_dtheta * pxx + dB_dtheta * pzz + dC_dtheta * pxz;
+            const double dA_dtheta = 2.0f * eps * sin2th - dSd_dtheta;
+            const double dB_dtheta = -2.0f * eps * sin2th - dSd_dtheta;
+            const double dC_dtheta = 4.0f * eps * cos2th;
+            const double dP_deps = -(2.0f * cos2 + dSd_deps) * pxx-(2.0f * sin2 + dSd_deps) * pzz + 2.0f * sin2th * pxz;
+            const double dP_ddelta = -dSd_ddelta * Q;
+            const double dP_dtheta = dA_dtheta * pxx + dB_dtheta * pzz + dC_dtheta * pxz;
 
             eps_grad[idx] += adj * dP_deps;
             delta_grad[idx] += adj * dP_ddelta;
