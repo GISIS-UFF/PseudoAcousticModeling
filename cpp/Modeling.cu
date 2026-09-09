@@ -443,8 +443,8 @@ void Modeling::solveWaveEquation(){
         sz = pmt->sz[shot];
         resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            injectSource <<<1, 1, 0, compute_stream>>>(current, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz);
             forward_step(k);
+            injectSource <<<1, 1, 0, compute_stream>>>(future, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz, pmt->dt);
             if(k>=pmt->itlag){
                 storeSeismogram<<<seisBlocks, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
@@ -477,11 +477,11 @@ void Modeling::solveWaveEquation(){
     }
 }
 
-__global__ void injectSource(float* current, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz, const float dx, const float dz){
+__global__ void injectSource(float* future, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz, const float dx, const float dz, const float dt){
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     float inv_dxdz = 1.0f / (dx * dz);
     if ((index == 0) && (k < nt)){
-        current[sz * nx_abc + sx] += source[k]*inv_dxdz;
+        future[sz * nx_abc + sx] += source[k]*inv_dxdz*dt*dt;
     }
 }
 

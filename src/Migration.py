@@ -235,9 +235,6 @@ class migration:
                 updateWaveEquationTTIGPU(self.wf.future, self.wf.current, self.pmt.nx_abc, self.pmt.nz_abc, self.pmt.dt, self.pmt.dx, self.pmt.dz, self.wf.vp_exp, self.wf.epsilon_exp, self.wf.delta_exp, self.wf.theta_exp)
 
     def backward_step(self,k,P=None):
-        if k >= self.pmt.itlag:
-            it = k - self.pmt.itlag
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz))
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
             self.futurebck = updateWaveEquation(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
@@ -260,11 +257,12 @@ class migration:
             # Apply absorbing boundary condition
             self.futurebck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.futurebck, self.wf.A)
             self.currentbck = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.currentbck, self.wf.A)
-
-    def backward_stepGPU(self,k,P=None):
+        
         if k >= self.pmt.itlag:
             it = k - self.pmt.itlag
-            self.currentbck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz))
+            self.futurebck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz)) * self.pmt.dt * self.pmt.dt
+
+    def backward_stepGPU(self,k,P=None):
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
             updateWaveEquationGPU(self.futurebck, self.currentbck, self.wf.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
@@ -284,6 +282,10 @@ class migration:
             solveAdjointWaveEquationTTICuda(self.futurebck,self.currentbck,P,self.AUc,self.BUc,self.HUc,self.QCxUc,self.QCzUc,self.pmt.dt,self.pmt.dx,self.pmt.dz,self.pmt.nx_abc,self.pmt.nz_abc,self.wf.vp_exp,self.wf.epsilon_exp,self.wf.delta_exp,self.wf.theta_exp)
             # Apply absorbing boundary condition
             self.futurebck, self.currentbck = AbsorbingBoundaryGPU(self.futurebck,self.currentbck,self.pmt.N_abc,self.pmt.nx_abc,self.pmt.nz_abc, self.wf.A)
+        
+        if k >= self.pmt.itlag:
+            it = k - self.pmt.itlag
+            self.futurebck[self.pmt.rz, self.pmt.rx] += (self.muted_seismogram[it, :] / (self.pmt.dx*self.pmt.dz)) * self.pmt.dt * self.pmt.dt
 
     def save_boundaries(self,k):
         self.top[k,:,:]   = self.wf.future[self.pmt.N_abc: self.pmt.N_abc + 4, self.pmt.N_abc: self.pmt.N_abc + self.pmt.nx]

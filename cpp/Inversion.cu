@@ -130,8 +130,8 @@ double Inversion::ObjectiveFunction(){
         mdl->sz = pmt->sz[shot];
         mdl->resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            injectSource<<<1, 1, 0,mdl->compute_stream>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz);
             mdl->forward_step(k);
+            injectSource<<<1, 1, 0,mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz, pmt->dt);
             if(k>=pmt->itlag){
                 storeSeismogram<<<mdl->seisBlocks, nThreads,0,mdl->compute_stream>>>(mdl->current, mdl->seismogram, mdl->rx, mdl->rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
@@ -216,8 +216,8 @@ double Inversion::calculateGradientOntheFly(){
         mgt->resetFields();
         mdl->resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz);
             mdl->forward_step(k);
+            injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz, pmt->dt);
             if(k>=pmt->itlag){
                 storeSeismogram<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>(mdl->current, mdl->seismogram, mdl->rx, mdl->rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
@@ -231,11 +231,6 @@ double Inversion::calculateGradientOntheFly(){
         }
         cudaStreamSynchronize(mdl->compute_stream);
         for (int t = pmt->nt - 1; t >= 0; t--){
-            if (t >= pmt->itlag){
-                int it = t - pmt->itlag;
-                injectAdjointSource<<<mdl->seisBlocks, nThreads,0,mdl->compute_stream>>>(mgt->currentbck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
-            }
-
             const int previous_t = std::max(t - 1, 0);
             const int next_t = std::min(t + 1, pmt->nt - 1);
 
@@ -244,6 +239,12 @@ double Inversion::calculateGradientOntheFly(){
             float* Pf = mgt->savefield + next_t * n_model_exp;
 
             backward_step(t, Pc, Pp, Pf);
+
+            if (t >= pmt->itlag){
+                int it = t - pmt->itlag;
+                injectAdjointSource<<<mdl->seisBlocks, nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz,pmt->dt);
+            }
+
             std::swap(mgt->currentbck, mgt->futurebck);
         }
         cudaStreamSynchronize(mdl->compute_stream);
@@ -290,8 +291,8 @@ double Inversion::calculateGradientCheckpoint(){
         mgt->resetFields();
         mdl->resetFields();
         for(int k = 0; k < pmt->nt; k++){
-            injectSource<<< 1, 1, 0, mdl->compute_stream>>>(mdl->current, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz);
             mdl->forward_step(k);
+            injectSource<<< 1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz, pmt->dt);
             if(k >= pmt->itlag){
                 storeSeismogram<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>(mdl->current, mdl->seismogram, mdl->rx, mdl->rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
@@ -333,15 +334,14 @@ double Inversion::calculateGradientCheckpoint(){
             }
 
             for(int t = window_start; t >= window_end; t--){
-                if(t>=pmt->itlag){
-                    const int it=t-pmt->itlag;
-                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->currentbck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz);
-                }
-
                 cudaMemcpyAsync(past_field, mdl->future, n_model_exp*sizeof(float), cudaMemcpyDeviceToDevice, mdl->compute_stream);
+                removeSource<<< 1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, t, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz, pmt->dt);
                 mdl->forward_step(t);
                 backward_step(t, mdl->current, mdl->future, past_field);
-                removeSource<<< 1, 1, 0, mdl->compute_stream>>>(mdl->current, mdl->source, t, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz);
+                if(t>=pmt->itlag){
+                    const int it=t-pmt->itlag;
+                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt);
+                }
                 
                 std::swap(mdl->current,mdl->future);
                 std::swap(mgt->currentbck,mgt->futurebck);
@@ -990,10 +990,12 @@ void Inversion::adjustfmax(const float fmax){
     pmt->tlag = 2.0f*std::sqrt(pi)/pmt->fcut;
     pmt->itlag = static_cast<int>(pmt->tlag/pmt->dt);
     pmt->nt = pmt->itlag + pmt->nt_data;
-    cudaMemset((void**)&mdl->source, 0, pmt->nt * sizeof(float));
+    cudaFree(mdl->source);
+    cudaMalloc(&mdl->source, pmt->nt * sizeof(float));
     mdl->createWavelet();
     if (pmt->migration == "onthefly"){
-        cudaMemset((void**)&mgt->savefield, 0, pmt->nt * n_model_exp * sizeof(float));
+        cudaFree(mgt->savefield);
+        cudaMalloc(&mgt->savefield, pmt->nt*n_model_exp*sizeof(float));
     }
 }
 

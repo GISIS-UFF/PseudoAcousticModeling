@@ -66,8 +66,8 @@ class Migration{
 };
 
 __global__ void normalizeImage(float* __restrict__ image,const float* __restrict__ ilum,int nx,int nz);
-__global__ void removeSource(float* __restrict__ current,const float* __restrict__ source,int k,const int nt,const int nx_abc,const int sx,const int sz,float dx,float dz);
-__global__ void injectAdjointSource(float* __restrict__ currentbck,const float* __restrict__ seismogram,const int* rx,const int* rz,int t,int Nrec,int nx_abc,float dx,float dz);
+__global__ void removeSource(float* __restrict__ future,const float* __restrict__ source,int k,const int nt,const int nx_abc,const int sx,const int sz,float dx,float dz,float dt);
+__global__ void injectAdjointSource(float* __restrict__ futurebck,const float* __restrict__ seismogram,const int* rx,const int* rz,int t,int Nrec,int nx_abc,float dx,float dz,float dt);
 __global__ void updateAdjointWaveEquation(float* __restrict__ Uf,float* __restrict__ Uc,float* __restrict__ P,float* __restrict__ image,float* __restrict__ ilum,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt,float* __restrict__ A,int N_abc);
 __global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc,const float* __restrict__ P,float* __restrict__ AUc,float* __restrict__ BUc,float* __restrict__ QCxUc,float* __restrict__ QCzUc,const int nx,const int nz,const float dx,const float dz,const float* __restrict__ epsilon,const float* __restrict__ delta);
 __global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf,float* __restrict__ Uc,float* __restrict__ P,float* __restrict__ image,float* __restrict__ ilum,float* __restrict__ AUc,float* __restrict__ BUc,float* __restrict__ QCxUc,float* __restrict__ QCzUc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,float* __restrict__ A,int N_abc);

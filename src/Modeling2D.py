@@ -333,7 +333,6 @@ class wavefield:
                 self.snap_idx = 0
 
     def forward_step(self, k):
-        self.current[self.isz,self.isx] += self.source[k]
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
             self.future = updateWaveEquation(self.future, self.current, self.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
@@ -359,9 +358,10 @@ class wavefield:
             self.current = AbsorbingBoundary(self.pmt.N_abc, self.pmt.nz_abc, self.pmt.nx_abc, self.current, self.A)
         else:
             raise ValueError("ERROR: Unknown approximation. Choose 'acoustic', 'VTI' or 'TTI'. Otherwise, unknown Absorbing Boundary Condition. Choose 'cerjan' or 'CPML'.")
+
+        self.future[self.isz,self.isx] += self.source[k] * self.pmt.dt * self.pmt.dt
         
     def forward_stepGPU(self, k):
-        self.current[self.isz,self.isx] += self.source[k]
         if self.pmt.approximation == "acoustic" and self.pmt.ABC == "cerjan":
             updateWaveEquationGPU(self.future, self.current, self.vp_exp, self.pmt.nz_abc, self.pmt.nx_abc, self.pmt.dz, self.pmt.dx, self.pmt.dt)
             # Apply absorbing boundary condition
@@ -385,6 +385,8 @@ class wavefield:
         else:
             raise ValueError("ERROR: Unknown approximation. Choose 'acoustic', 'VTI' or 'TTI'. Otherwise, unknown Absorbing Boundary Condition. Choose 'cerjan' or 'CPML'.")
         
+        self.future[self.isz,self.isx] += self.source[k] * self.pmt.dt * self.pmt.dt
+
     def solveWaveEquation(self):
         start_time = time.time()
         print(f"info: Solving {self.pmt.approximation} wave equation")

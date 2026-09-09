@@ -56,7 +56,7 @@ public:
     void solveWaveEquation(); 
 };
 
-__global__ void injectSource(float* __restrict__ current,const float* __restrict__ source,int k,const int nt,const int nx_abc,const int sx,const int sz,const float dx,const float dz);
+__global__ void injectSource(float* __restrict__ future,const float* __restrict__ source,int k,const int nt,const int nx_abc,const int sx,const int sz,const float dx,const float dz, const float dt);
 __global__ void storeSeismogram(const float* current, float* seismogram, const int* rx, const int* rz, int k, int itlag, int Nrec, int nx_abc);
 __global__ void updateWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc);
 __global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc );
