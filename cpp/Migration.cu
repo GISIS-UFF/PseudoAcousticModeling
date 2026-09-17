@@ -658,7 +658,7 @@ __global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc, const 
                 + a4 * (P[i + 4*nx] - P[i - 4*nx])) * inv_dz;
 
         const float eps  = epsilon[i];
-        const float delt = delta[i];
+        const float del = delta[i];
 
         const float px2 = px * px;
         const float pz2 = pz * pz;
@@ -666,16 +666,16 @@ __global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc, const 
         const float px4 = px2 * px2;
         const float pz4 = pz2 * pz2;
 
-        const float num = -2.0f * (eps - delt) * px2 * pz2;
-        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + delt) * px2 * pz2;
+        const float num = -2.0f * (eps - del) * px2 * pz2;
+        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2 * pz2;
         const float den_reg = den + 1e-37f;
         const float inv_den = 1.0f / den_reg;
         const float Sd = num * inv_den;
 
-        const float dnum_dpx = -4.0f * (eps - delt) * px * pz2;
-        const float dnum_dpz = -4.0f * (eps - delt) * px2 * pz;
-        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * px * px2 + 4.0f * (1.0f + delt) * px * pz2;
-        const float dden_dpz = 4.0f * pz * pz2 + 4.0f * (1.0f + delt) * px2 * pz;
+        const float dnum_dpx = -4.0f * (eps - del) * px * pz2;
+        const float dnum_dpz = -4.0f * (eps - del) * px2 * pz;
+        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * px * px2 + 4.0f * (1.0f + del) * px * pz2;
+        const float dden_dpz = 4.0f * pz * pz2 + 4.0f * (1.0f + del) * px2 * pz;
         const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
         const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
                 
@@ -838,7 +838,7 @@ __global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const 
                 + a4 * (P[i + 4*nx] - P[i - 4*nx])) * inv_dz;
 
         const float eps  = epsilon[i];
-        const float delt = delta[i];
+        const float del = delta[i];
         const float c = cosf(theta[i]);
         const float s = sinf(theta[i]);
 
@@ -851,17 +851,17 @@ __global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const 
         const float xi4  = xi2 * xi2;
         const float eta4 = eta2 * eta2;
 
-        const float num = -2.0f * (eps - delt) * xi2* eta2;
-        const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + delt) * xi2 * eta2;
+        const float num = -2.0f * (eps - del) * xi2* eta2;
+        const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2 * eta2;
 
         const float den_reg = den + 1e-37f;
         const float inv_den = 1.0f / den_reg;
         const float Sd = num * inv_den;
 
-        const float dnum_dpx = -4.0f * (eps - delt) * (xi * eta2 * c + xi2 * eta * s);
-        const float dnum_dpz = -4.0f * (eps - delt) * (xi * eta2 * (-s) + xi2 * eta * c);
-        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + delt) * (xi * eta2 * c + xi2 * eta * s);
-        const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + delt) * (xi * eta2 * (-s) + xi2 * eta * c);
+        const float dnum_dpx = -4.0f * (eps - del) * (xi * eta2 * c + xi2 * eta * s);
+        const float dnum_dpz = -4.0f * (eps - del) * (xi * eta2 * (-s) + xi2 * eta * c);
+        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + del) * (xi * eta2 * c + xi2 * eta * s);
+        const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + del) * (xi * eta2 * (-s) + xi2 * eta * c);
         const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
         const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
         

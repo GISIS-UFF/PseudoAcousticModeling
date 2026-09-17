@@ -1208,9 +1208,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         y_theta_store.clear();
 
         float X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
-        float X_current;
         const float g_vp_max0 = getGradientScale(grad_vp_h);
-        const float g_vp_max0 = 1.0f;
         scaleGradient(grad_vp_h,g_vp_max0);
 
         float g_eps_max0 = 1.0f;
@@ -1808,16 +1806,16 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
     const float eta4 = eta2 * eta2;
     const float xi2eta2 = xi2 * eta2;
 
-    const float num = -2.0f * (eps - delt) * xi2* eta2;
-    const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + delt) * xi2 * eta2;
+    const float num = -2.0f * (eps - del) * xi2* eta2;
+    const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2 * eta2;
     const float den_reg = den + 1e-37f;
     const float inv_den = 1.0f / den_reg;
     const float Sd = num * inv_den;
 
-    const float dnum_dpx = -4.0f * (eps - delt) * (xi * eta2 * c + xi2 * eta * s);
-    const float dnum_dpz = -4.0f * (eps - delt) * (xi * eta2 * (-s) + xi2 * eta * c);
-    const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + delt) * (xi * eta2 * c + xi2 * eta * s);
-    const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + delt) * (xi * eta2 * (-s) + xi2 * eta * c);
+    const float dnum_dpx = -4.0f * (eps - del) * (xi * eta2 * c + xi2 * eta * s);
+    const float dnum_dpz = -4.0f * (eps - del) * (xi * eta2 * (-s) + xi2 * eta * c);
+    const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + del) * (xi * eta2 * c + xi2 * eta * s);
+    const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + del) * (xi * eta2 * (-s) + xi2 * eta * c);
     const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
     const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
 
