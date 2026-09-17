@@ -6,15 +6,15 @@ class model:
         self.wf = wavefield
 
         self.vp1 = 1500.0 
-        self.vp2 = 2000.0
+        self.vp2 = 1500.0
         self.vp3 = 00.0
 
-        self.epsilon1 = 0.0
-        self.epsilon2 = 0.0
+        self.epsilon1 = 0.1
+        self.epsilon2 = 0.1
         self.epsilon3 = 0.0
 
-        self.delta1 = 0.3
-        self.delta2 = 0.3
+        self.delta1 = 0.05
+        self.delta2 = 0.05
         self.delta3 = 0.0
 
         self.theta1 = 30.0
@@ -24,6 +24,7 @@ class model:
     def create2LayerModel(self,v1,v2,e1,e2,d1,d2,t1,t2):
         self.wf.vp[:self.pmt.nz//2, :] = v1
         self.wf.vp[self.pmt.nz//2:self.pmt.nz, :] = v2
+        self.wf.vp[290:, :] = 2500
         self.modelFile = f"{self.pmt.modelFolder}layer2vp_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
         self.wf.vp.tofile(self.modelFile)
         print(f"info: Vp saved to {self.modelFile}")
@@ -31,12 +32,14 @@ class model:
         if self.pmt.approximation in ["VTI", "TTI"]:
             self.wf.epsilon[:self.pmt.nz//2, :] = e1
             self.wf.epsilon[self.pmt.nz//2:self.pmt.nz, :] = e2
+            self.wf.epsilon[290:, :] = 0.3
             self.modelFile = f"{self.pmt.modelFolder}layer2epsilon_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
             self.wf.epsilon.tofile(self.modelFile)
             print(f"info: Epsilon saved to {self.modelFile}")
 
             self.wf.delta[:self.pmt.nz//2, :] = d1
             self.wf.delta[self.pmt.nz//2:self.pmt.nz, :] = d2
+            self.wf.delta[290:, :] = 0.2
             self.modelFile = f"{self.pmt.modelFolder}layer2delta_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
             self.wf.delta.tofile(self.modelFile)
             print(f"info: Delta saved to {self.modelFile}")
@@ -81,21 +84,26 @@ class model:
     
     def createDiffractorModel(self,v1,v2,e1,e2,d1,d2,t1,t2):
         self.wf.vp[:, :] = v1
-        self.wf.vp[self.pmt.nz//2,self.pmt.nx//2] = v2
-        # self.wf.vp[(self.pmt.nz // 2)-20:(self.pmt.nz // 2)+20, (self.pmt.nx // 2)-20:(self.pmt.nx // 2)+20] = v2
+        # self.wf.vp[self.pmt.nz//2,self.pmt.nx//2] = v2
+        self.wf.vp[(self.pmt.nz // 2)-5:(self.pmt.nz // 2)+5, (self.pmt.nx // 2)-5:(self.pmt.nx // 2)+5] = v2
+        self.wf.vp[290:, :] = 2500
         self.modelFile = f"{self.pmt.modelFolder}diffractorvp_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
         self.wf.vp.tofile(self.modelFile)
         print(f"info: Vp saved to {self.modelFile}")
 
         if self.pmt.approximation in ["VTI", "TTI"]:
             self.wf.epsilon[:, :] = e1
-            self.wf.epsilon[self.pmt.nz // 2, self.pmt.nx // 2] = e2
+            # self.wf.epsilon[self.pmt.nz // 2, self.pmt.nx // 2] = e2
+            self.wf.epsilon[(self.pmt.nz // 2)-5:(self.pmt.nz // 2)+5, (self.pmt.nx // 2)-5:(self.pmt.nx // 2)+5] = e2
+            self.wf.epsilon[290:, :] = 0.3
             self.modelFile = f"{self.pmt.modelFolder}diffractorepsilon_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
             self.wf.epsilon.tofile(self.modelFile)
             print(f"info: Epsilon saved to {self.modelFile}")
 
             self.wf.delta[:, :] = d1
-            self.wf.delta[self.pmt.nz // 2, self.pmt.nx // 2] = d2
+            # self.wf.delta[self.pmt.nz // 2, self.pmt.nx // 2] = d2
+            self.wf.delta[(self.pmt.nz // 2)-5:(self.pmt.nz // 2)+5, (self.pmt.nx // 2)-5:(self.pmt.nx // 2)+5] = d2
+            self.wf.delta[290:, :] = 0.2
             self.modelFile = f"{self.pmt.modelFolder}diffractordelta_Nz{self.pmt.nz}_Nx{self.pmt.nx}.bin"
             self.wf.delta.tofile(self.modelFile)
             print(f"info: Delta saved to {self.modelFile}")

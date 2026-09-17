@@ -561,14 +561,15 @@ class migration:
                     self.theta_grad += self.theta_partial
             self.ilum += self.ilum_partial
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
-       
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * np.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
@@ -688,13 +689,15 @@ class migration:
             self.ilum += self.ilum_partial
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * np.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
@@ -811,13 +814,15 @@ class migration:
             self.ilum += self.ilum_partial
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * np.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * np.max(self.ilum))    
+                self.theta_grad = self.theta_grad    
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
@@ -936,13 +941,15 @@ class migration:
             self.ilum += self.ilum_partial
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * np.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * np.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * np.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
             self.migrated_image.astype(np.float32).tofile(self.outputFile)
@@ -1085,13 +1092,15 @@ class migration:
             self.save_snapshotBCKGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * cp.max(self.ilum) )
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         migrated_imagecpu = cp.asnumpy(self.migrated_image)
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
@@ -1237,13 +1246,15 @@ class migration:
             self.save_snapshotBCKGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         migrated_imagecpu = cp.asnumpy(self.migrated_image)
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
@@ -1384,13 +1395,15 @@ class migration:
             self.ilum += self.ilum_partial
             self.save_snapshotBCKGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         migrated_imagecpu = cp.asnumpy(self.migrated_image)      
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"
@@ -1535,13 +1548,15 @@ class migration:
             self.save_snapshotBCKGPU(shot)
             print(f"info: Shot {shot+1} completed in {time.time() - start_time:.2f} seconds")
        
-        self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
+        if self.pmt.fwi == False:
+            self.migrated_image = self.migrated_image / (self.ilum + 1e-5 * cp.max(self.ilum))
         if self.pmt.fwi == True and self.pmt.multiparameter == True:
+            self.migrated_image = self.migrated_image
             if self.pmt.approximation in ["VTI", "TTI"]:
-                self.epsilon_grad = self.epsilon_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
-                self.delta_grad = self.delta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.epsilon_grad = self.epsilon_grad 
+                self.delta_grad = self.delta_grad 
             if self.pmt.approximation == "TTI":
-                self.theta_grad = self.theta_grad / (self.ilum + 1e-5 * cp.max(self.ilum))
+                self.theta_grad = self.theta_grad 
         migrated_imagecpu = cp.asnumpy(self.migrated_image)
         if self.pmt.fwi  == True:
             self.outputFile = f"{self.pmt.gradientsFolder}gradient_{self.pmt.approximation}_Nx{self.pmt.nx}_Nz{self.pmt.nz}.bin"

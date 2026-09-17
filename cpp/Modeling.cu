@@ -108,7 +108,7 @@ void Modeling::importBin(std::string path, float* array, int n){
 }
 
 void Modeling::createCerjanVector(){
-    const float sb = 5.0f * pmt->N_abc;
+    const float sb = 4.0f * pmt->N_abc;
     float* A_h = new float[pmt->N_abc]();
     for (int i = 0; i < pmt->N_abc; i++){
         float fb = (pmt->N_abc - i) / (1.4142f * sb);
@@ -382,7 +382,7 @@ void Modeling::setModel(){
 
 void Modeling::saveSnapshot(const int shot,const int k){
     const int n_model = pmt->nx*pmt->nz;
-    std::string snapshotFile = pmt->snapshotFolder + pmt->approximation + "forward_shot_" + std::to_string(shot + 1) + "Nx" + std::to_string(pmt->nx) + "_Nz" + std::to_string(pmt->nz) + "_Nt" + std::to_string(pmt->nt) + "_frame" + std::to_string(k) + ".bin";
+    std::string snapshotFile = pmt->snapshotFolder + pmt->approximation + "forward_shot_" + std::to_string(shot + 1) + "_Nx" + std::to_string(pmt->nx) + "_Nz" + std::to_string(pmt->nz) + "_Nt" + std::to_string(pmt->nt) + "_frame_" + std::to_string(k) + ".bin";
     
     std::ofstream file(snapshotFile,std::ios::binary);
     if (!file.is_open()){

@@ -456,9 +456,8 @@ void Migration::solveReverseTimeMigrationCheckpoint(){
                 if(k != last_checkpoint){
                 cudaMemcpyAsync(h_current, d_current, n_model_exp*sizeof(float), cudaMemcpyDeviceToHost, mdl->copy_stream);
                 cudaMemcpyAsync(h_future, d_future, n_model_exp*sizeof(float), cudaMemcpyDeviceToHost, mdl->copy_stream);
+                }
             }
-            }
-
             std::swap(mdl->current,mdl->future);
         }
 
@@ -510,15 +509,8 @@ __global__ void normalizeImage(float* __restrict__ image, const float* __restric
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int n_model = nx * nz;
 
-    float eps = 1e-12f;
-
     if(i<n_model){
-        if(ilum[i]>eps){
-            image[i]/=ilum[i];
-        } 
-        else{
-            image[i]=0.0f;
-        } 
+        image[i]/=ilum[i];
     }       
 }
 
@@ -538,7 +530,7 @@ __global__ void injectAdjointSource(float* __restrict__ futurebck, const float* 
     }
 
     float inv_dxdz = 1.0f / (dx * dz);  
-    futurebck[rz[irec] * nx_abc + rx[irec]] += seismogram[t * Nrec + irec] * inv_dxdz * dt * dt;
+    futurebck[rz[irec] * nx_abc + rx[irec]] += seismogram[t * Nrec + irec] * inv_dxdz*dt*dt ;
 }
 
 __global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc, float* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc){

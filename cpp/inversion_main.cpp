@@ -14,6 +14,8 @@ auto ti = std::chrono::system_clock::now();
 
     mdl.initializeFields();
     mgt.initializeMigrationFields();
+    cudaFree(mgt.ilum);
+    mgt.ilum = nullptr;
     inv.InitializeInversionFields();
     if(pmt.multiparameter){
         inv.solveFullWaveformInversionMultiparameterHierarchical();
