@@ -526,12 +526,12 @@ float Inversion::calculateGradient(const std::string& parameter, float* gradient
     const int n_model = pmt->nx*pmt->nz;
     cudaMemcpy(gradient,gradient_device,n_model*sizeof(float),cudaMemcpyDeviceToHost);
     
-    // #pragma omp parallel for
-    // for(int i = 0; i < n_model; i++){
-    //     if(water_mask[i]){
-    //         gradient[i] = 0.0f;
-    //     }
-    // }
+    #pragma omp parallel for
+    for(int i = 0; i < n_model; i++){
+        if(water_mask[i]){
+            gradient[i] = 0.0f;
+        }
+    }
 
     pmt->multiparameter = multiparameter;
     return X_current;
@@ -566,21 +566,21 @@ float Inversion::calculateMultiparameterGradient(const bool update_eps, const bo
         cudaMemcpy(gradient_theta, theta_grad, n_model*sizeof(float), cudaMemcpyDeviceToHost);
     }
 
-    // #pragma omp parallel for
-    // for(int i = 0; i < n_model; i++){
-    //     if(water_mask[i]){
-    //         gradient_vp[i] = 0.0f;
-    //         if(update_eps){
-    //             gradient_eps[i] = 0.0f;
-    //         }
-    //         if(update_delta){
-    //             gradient_delta[i] = 0.0f;
-    //         }
-    //         if(update_theta){
-    //             gradient_theta[i] = 0.0f;
-    //         }
-    //     }
-    // }
+    #pragma omp parallel for
+    for(int i = 0; i < n_model; i++){
+        if(water_mask[i]){
+            gradient_vp[i] = 0.0f;
+            if(update_eps){
+                gradient_eps[i] = 0.0f;
+            }
+            if(update_delta){
+                gradient_delta[i] = 0.0f;
+            }
+            if(update_theta){
+                gradient_theta[i] = 0.0f;
+            }
+        }
+    }
 
     pmt->multiparameter = multiparameter;
     
@@ -1000,7 +1000,7 @@ void Inversion::setModel(){
 
     mdl->importBin(pmt->vpFile, v_h, n_model);
     water_mask = mgt->createMask(v_h);
-    // mgt->smoothModel(v_h, water_mask, false);
+    mgt->smoothModel(v_h, water_mask, false);
     const std::string vp_smooth_file = pmt->modelFolder + "fwi_vp_smooth_"+ pmt->approximation+ "_Nx"+std::to_string(pmt->nx)+ "_Nz"+std::to_string(pmt->nz)+".bin";
     saveModel(vp_smooth_file,v_h);
 
@@ -1013,12 +1013,12 @@ void Inversion::setModel(){
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
         mdl->importBin(pmt->epsilonFile, eps_h, n_model);
-        // mgt->smoothModel(eps_h, water_mask, true);
+        mgt->smoothModel(eps_h, water_mask, true);
 
         ExpandModelDevice("epsilon",eps_h);
 
         mdl->importBin(pmt->deltaFile, delta_h, n_model);
-        // mgt->smoothModel(delta_h, water_mask, true);
+        mgt->smoothModel(delta_h, water_mask, true);
 
         ExpandModelDevice("delta",delta_h);
         
@@ -1172,8 +1172,8 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
 
     const int n_model = pmt->nx*pmt->nz;
     const float eps_start = 0.0f;
-    const float delta_start = 0.0f;
-    const float theta_start = 0.85f;
+    const float delta_start = 0.50f;
+    const float theta_start = 0.75f;
 
     const int eps_first_itr = 1 + static_cast<int>(std::ceil(eps_start*(pmt->niter - 1)));
     const int delta_first_itr = 1 + static_cast<int>(std::ceil(delta_start*(pmt->niter - 1)));
@@ -1207,19 +1207,19 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         s_theta_store.clear();
         y_theta_store.clear();
 
-        // float X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
+        float X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
         float X_current;
-        // const float g_vp_max0 = getGradientScale(grad_vp_h);
+        const float g_vp_max0 = getGradientScale(grad_vp_h);
         const float g_vp_max0 = 1.0f;
-        // scaleGradient(grad_vp_h,g_vp_max0);
+        scaleGradient(grad_vp_h,g_vp_max0);
 
         float g_eps_max0 = 1.0f;
         float g_delta_max0 = 1.0f;
         float g_theta_max0 = 1.0f;
 
-        // const float X_freq0 = X_current;
+        const float X_freq0 = X_current;
 
-        // history_stream << X_current/X_freq0 << " " << fmax << std::endl;
+        history_stream << X_current/X_freq0 << " " << fmax << std::endl;
 
         for(int itr = 0; itr < pmt->niter; itr++){
             const int iteration = itr + 1;
@@ -1245,31 +1245,31 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             if(iteration == eps_first_itr || iteration == delta_first_itr || (pmt->approximation == "TTI" && iteration == theta_first_itr)){
                 X_current = calculateMultiparameterGradient(update_eps,update_delta,update_theta,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
 
-                // scaleGradient(grad_vp_h,g_vp_max0);
+                scaleGradient(grad_vp_h,g_vp_max0);
 
-                // if(iteration == eps_first_itr){
-                //     g_eps_max0 = getGradientScale(grad_eps_h);
-                // }
+                if(iteration == eps_first_itr){
+                    g_eps_max0 = getGradientScale(grad_eps_h);
+                }
 
-                // if(iteration == delta_first_itr){
-                //     g_delta_max0 = getGradientScale(grad_delta_h);
-                // }
+                if(iteration == delta_first_itr){
+                    g_delta_max0 = getGradientScale(grad_delta_h);
+                }
 
-                // if(pmt->approximation == "TTI" && iteration == theta_first_itr){
-                //     g_theta_max0 = getGradientScale(grad_theta_h);
-                // }
+                if(pmt->approximation == "TTI" && iteration == theta_first_itr){
+                    g_theta_max0 = getGradientScale(grad_theta_h);
+                }
 
-                // if(update_eps){
-                //     scaleGradient(grad_eps_h,g_eps_max0);
-                // }
+                if(update_eps){
+                    scaleGradient(grad_eps_h,g_eps_max0);
+                }
 
-                // if(update_delta){
-                //     scaleGradient(grad_delta_h,g_delta_max0);
-                // }
+                if(update_delta){
+                    scaleGradient(grad_delta_h,g_delta_max0);
+                }
 
-                // if(update_theta){
-                //     scaleGradient(grad_theta_h,g_theta_max0);
-                // }
+                if(update_theta){
+                    scaleGradient(grad_theta_h,g_theta_max0);
+                }
             }
 
             const std::string gradient_vp_file = pmt->gradientsFolder+"vp_gradient_fwi_iter_"+std::to_string(iteration)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
@@ -1404,7 +1404,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
 
             X_current = X_new;
 
-            // history_stream << X_current/X_freq0 << " " << fmax << std::endl;
+            history_stream << X_current/X_freq0 << " " << fmax << std::endl;
 
             #pragma omp parallel for
             for(int i = 0; i < n_model; i++){
@@ -1593,47 +1593,40 @@ const int nx, const int nz, const int N_abc, const bool multiparameter){
     const float eps = epsilon[i];
     const float del = delta[i];
 
-    const double px2 = static_cast<double>(px) * static_cast<double>(px);
-    const double pz2 = static_cast<double>(pz) * static_cast<double>(pz);
+    const float px2 = px * px;
+    const float pz2 = pz * pz;
+    const float px4 = px2 * px2;
+    const float pz4 = pz2 * pz2;
+    const float px2pz2 = px2 * pz2;
 
-    const double px4 = px2 * px2;
-    const double pz4 = pz2 * pz2;
+    const float num = -2.0f * (eps - del) * px2 * pz2;
+    const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2 * pz2;
+    const float den_reg = den + 1e-37f;
+    const float inv_den = 1.0f / den_reg;
+    const float Sd = num * inv_den;
 
-    const double px2pz2 = px2 * pz2;
-
-    const double num = -2.0f * (eps - del) * px2pz2;
-    const double den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
-
-    double Sd = 0.0f;
-    double Cx = 0.0f;
-    double Cz = 0.0f;
-    double dSd_deps   = 0.0f;
-    double dSd_ddelta = 0.0f;
-
-    if(std::abs(den) > 1.0e-12){
-        const double inv_den = 1.0f / den;
-        const double inv_den2 = inv_den * inv_den;
-        Sd = num * inv_den;
-
-        const double factor = 4.0f * (eps - del) * ((1.0f + 2.0f * eps) * px4 - pz4) * inv_den2;
+    const float dnum_dpx = -4.0f * (eps - del) * px * pz2;
+    const float dnum_dpz = -4.0f * (eps - del) * px2 * pz;
+    const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * px * px2 + 4.0f * (1.0f + del) * px * pz2;
+    const float dden_dpz = 4.0f * pz * pz2 + 4.0f * (1.0f + del) * px2 * pz;
+    const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
+    const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
     
-        Cx = factor * px * pz2;
-        Cz = -factor * px2 * pz;
-
-        if(multiparameter){
-            const double dnum_deps = -2.0f * px2pz2;
-            const double dnum_ddelta = 2.0f * px2pz2;
-            const double dden_deps = 2.0f * px4;
-            const double dden_ddelta = 2.0f * px2pz2;
-            dSd_deps = (dnum_deps * den - num * dden_deps) * inv_den2;
-            dSd_ddelta = (dnum_ddelta * den - num * dden_ddelta) * inv_den2;
-        }
+    float dSd_deps = 0.0;
+    float dSd_ddelta = 0.0;
+    if(multiparameter){
+        const float dnum_deps = -2.0f * px2pz2;
+        const float dnum_ddelta = 2.0f * px2pz2;
+        const float dden_deps = 2.0f * px4;
+        const float dden_ddelta = 2.0f * px2pz2;
+        dSd_deps = (dnum_deps - Sd * dden_deps) * inv_den;
+        dSd_ddelta = (dnum_ddelta - Sd * dden_ddelta) * inv_den;
     }
-
-    const double A = 1.0f + 2.0f * eps + Sd;
-    const double B = 1.0f + Sd;
-    const double Q = pxx + pzz;
-    const double adj = Uc[i];
+    
+    const float A = 1.0f + 2.0f * eps + Sd;
+    const float B = 1.0f + Sd;
+    const float Q = pxx + pzz;
+    const float adj = Uc[i];
     AUc[i] = A * adj;
     BUc[i] = B * adj;
     QCxUc[i] = Q * Cx * adj;
@@ -1646,12 +1639,12 @@ const int nx, const int nz, const int N_abc, const bool multiparameter){
         const int nxf = nx - 2 * N_abc;
         const int idx = zf * nxf + xf;
 
-        const double d2Pdt2 =(Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
+        const float d2Pdt2 =(Pf[i] - 2.0f * Pc[i] + Pp[i]) * inv_dt2;
         vp_grad[idx] += adj * d2Pdt2;
 
         if (multiparameter){
-            const double dP_deps = (-2.0f - dSd_deps) * pxx - dSd_deps * pzz;
-            const double dP_ddelta = -dSd_ddelta * Q;
+            const float dP_deps = (-2.0f - dSd_deps) * pxx - dSd_deps * pzz;
+            const float dP_ddelta = -dSd_ddelta * Q;
 
             eps_grad[idx] += adj * dP_deps;
             delta_grad[idx] += adj * dP_ddelta;
@@ -1807,51 +1800,44 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
 
     sincosf(th, &s, &c);
 
-    const double xi = static_cast<double>(px) * c - static_cast<double>(pz) * s;
-    const double eta = static_cast<double>(px) * s + static_cast<double>(pz) * c;
-    const double xi2 = xi * xi;
-    const double eta2 = eta * eta;
-    const double xi4 = xi2 * xi2;
-    const double eta4 = eta2 * eta2;
-    const double xi2eta2 = xi2 * eta2;
+    const float xi = px * c - pz * s;
+    const float eta = px * s + pz * c;
+    const float xi2 = xi * xi;
+    const float eta2 = eta * eta;
+    const float xi4 = xi2 * xi2;
+    const float eta4 = eta2 * eta2;
+    const float xi2eta2 = xi2 * eta2;
 
-    const double num = -2.0f * (eps - del) * xi2eta2;
-    const double den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2eta2;
+    const float num = -2.0f * (eps - delt) * xi2* eta2;
+    const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + delt) * xi2 * eta2;
+    const float den_reg = den + 1e-37f;
+    const float inv_den = 1.0f / den_reg;
+    const float Sd = num * inv_den;
 
-    double Sd = 0.0f;
-    double Cx = 0.0f;
-    double Cz = 0.0f;
-    double dSd_deps   = 0.0f;
-    double dSd_ddelta = 0.0f;
-    double dSd_dtheta = 0.0f;
+    const float dnum_dpx = -4.0f * (eps - delt) * (xi * eta2 * c + xi2 * eta * s);
+    const float dnum_dpz = -4.0f * (eps - delt) * (xi * eta2 * (-s) + xi2 * eta * c);
+    const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + delt) * (xi * eta2 * c + xi2 * eta * s);
+    const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + delt) * (xi * eta2 * (-s) + xi2 * eta * c);
+    const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
+    const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
 
+    float dSd_deps   = 0.0f;
+    float dSd_ddelta = 0.0f;
+    float dSd_dtheta = 0.0f;
+    if (multiparameter)
+    {
+        const float dnum_deps = -2.0f * xi2eta2;
+        const float dnum_ddelta =  2.0f * xi2eta2;
+        const float dden_deps =  2.0f * xi4;
+        const float dden_ddelta =  2.0f * xi2eta2;
+        const float dnum_dtheta = -2.0f * (eps - del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
+        const float dden_dtheta = -4.0f * (1.0f + 2.0f * eps) * xi * xi * xi * eta + 4.0f * xi * eta * eta * eta + 2.0f * (1.0f + del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
 
-    if(std::abs(den) > 1.0e-100){
-        const double inv_den = 1.0f / den;
-        const double inv_den2 = inv_den * inv_den;
-        Sd = num * inv_den;
-
-        const double K = (1.0f + 2.0f * eps) * xi4 - eta4;
-        const double factor = 4.0f * (eps - del) * xi * eta * K * inv_den2;
-
-        Cx = factor * pz;
-        Cz = -factor * px;
-
-        if (multiparameter)
-        {
-            const double dnum_deps = -2.0f * xi2eta2;
-            const double dnum_ddelta =  2.0f * xi2eta2;
-            const double dden_deps =  2.0f * xi4;
-            const double dden_ddelta =  2.0f * xi2eta2;
-            const double dnum_dtheta = -2.0f * (eps - del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
-            const double dden_dtheta = -4.0f * (1.0f + 2.0f * eps) * xi * xi * xi * eta + 4.0f * xi * eta * eta * eta + 2.0f * (1.0f + del) * (-2.0f * xi * eta * eta * eta + 2.0f * xi * xi * xi * eta);
-
-            dSd_deps = (dnum_deps * den - num * dden_deps) * inv_den2;
-            dSd_ddelta = (dnum_ddelta * den - num * dden_ddelta) * inv_den2;
-            dSd_dtheta = (dnum_dtheta * den - num * dden_dtheta) * inv_den2;
-        }
+        dSd_deps = (dnum_deps - Sd * dden_deps) * inv_den;
+        dSd_ddelta = (dnum_ddelta - Sd * dden_ddelta) * inv_den;
+        dSd_dtheta = (dnum_dtheta - Sd * dden_dtheta) * inv_den;
     }
-
+    
     const float cos2 = c * c;
     const float sin2 = s * s;
     const float sin2th = 2.0f * s * c;
@@ -1902,12 +1888,12 @@ const float dt, const float dx, const float dz, const int nx, const int nz, cons
             a4*a4*(Pc[i + 4*nx + 4]   - Pc[i - 4*nx + 4]   + Pc[i - 4*nx - 4]   - Pc[i + 4*nx - 4])) * inv_dxdz;
 
 
-            const double dA_dtheta = 2.0f * eps * sin2th - dSd_dtheta;
-            const double dB_dtheta = -2.0f * eps * sin2th - dSd_dtheta;
-            const double dC_dtheta = 4.0f * eps * cos2th;
-            const double dP_deps = -(2.0f * cos2 + dSd_deps) * pxx-(2.0f * sin2 + dSd_deps) * pzz + 2.0f * sin2th * pxz;
-            const double dP_ddelta = -dSd_ddelta * Q;
-            const double dP_dtheta = dA_dtheta * pxx + dB_dtheta * pzz + dC_dtheta * pxz;
+            const float dA_dtheta = 2.0f * eps * sin2th - dSd_dtheta;
+            const float dB_dtheta = -2.0f * eps * sin2th - dSd_dtheta;
+            const float dC_dtheta = 4.0f * eps * cos2th;
+            const float dP_deps = -(2.0f * cos2 + dSd_deps) * pxx-(2.0f * sin2 + dSd_deps) * pzz + 2.0f * sin2th * pxz;
+            const float dP_ddelta = -dSd_ddelta * Q;
+            const float dP_dtheta = dA_dtheta * pxx + dB_dtheta * pzz + dC_dtheta * pxz;
 
             eps_grad[idx] += adj * dP_deps;
             delta_grad[idx] += adj * dP_ddelta;

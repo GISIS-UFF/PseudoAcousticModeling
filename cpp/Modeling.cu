@@ -602,14 +602,21 @@ __global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict_
                     a3 * (Uc[i + 3*nx] - Uc[i - 3*nx]) +
                     a4 * (Uc[i + 4*nx] - Uc[i - 4*nx])) * inv_dz;
         
-        float num = -2.0f*(epsilon[i]-delta[i])*(px*px)*(pz*pz);
-        float den = (1.0f + 2.0f*epsilon[i])*(px*px*px*px) + (pz*pz*pz*pz) + 2.0f*(1.0f + delta[i])*(px*px)*(pz*pz);
+        const float eps = epsilon[i];
+        const float del = delta[i];
 
-        float Sd = 0.0f;
-        if (fabsf(den)>1e-12f){
-            Sd = num / den;
-        }
-        Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0f+ 2.0f*epsilon[i]) + Sd) * pxx + vp2 * dt2 *(1.0f + Sd) * pzz;
+        const float px2 = px * px;
+        const float pz2 = pz * pz;
+
+        const float px4 = px2 * px2;
+        const float pz4 = pz2 * pz2;
+        const float px2pz2 = px2 * pz2;
+
+        const float num = -2.0f * (eps - del) * px2pz2;
+        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
+        const float Sd =num / (den + 1e-37f);  
+
+        Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0f+ 2.0f*eps) + Sd) * pxx + vp2 * dt2 *(1.0f + Sd) * pzz;
 
         if (ix < N_abc){
             Uf[i] *= A[ix];
@@ -702,32 +709,28 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
                     a3 * (Uc[i + 3 * nx] - Uc[i - 3 * nx]) +
                     a4 * (Uc[i + 4 * nx] - Uc[i - 4 * nx])) * inv_dz;
 
-        float th = theta[i];
+        const float eps = epsilon[i];
+        const float del = delta[i];
+        const float th = theta[i];
 
-        float c = cosf(th);
-        float s = sinf(th);
+        const float c = cosf(th);
+        const float s = sinf(th);
 
-        float px_rot = px*c - pz*s;
-        float pz_rot = px*s + pz*c;
+        const float px_rot = px*c - pz*s;
+        const float pz_rot = px*s + pz*c;
 
-        float px_rot2 = px_rot*px_rot;
-        float pz_rot2 = pz_rot*pz_rot;
+        const float px_rot2 = px_rot*px_rot;
+        const float pz_rot2 = pz_rot*pz_rot;
 
-        float c2 = c*c;
-        float s2 = s*s;
-        float sin2th = 2.0f*s*c;
+        const float c2 = c*c;
+        const float s2 = s*s;
+        const float sin2th = 2.0f*s*c;
 
-        float num = -2.0f*(epsilon[i] - delta[i])*px_rot2*pz_rot2;
+        const float num = -2.0f*(eps - del)*px_rot2*pz_rot2;
+        const float den = (1.0f + 2.0f*eps)*px_rot2*px_rot2 + pz_rot2*pz_rot2 + 2.0f*(1.0f + del)*px_rot2*pz_rot2;
+        const float Sd = num / (den + 1e-37f);
 
-        float den = (1.0f + 2.0f*epsilon[i])*px_rot2*px_rot2 + pz_rot2*pz_rot2 + 2.0f*(1.0f + delta[i])*px_rot2*pz_rot2;
-
-        float Sd = 0.0f;
-
-        if (fabsf(den) > 1e-12f){
-            Sd = num/den;
-        }
-
-        Uf[i] = 2.0f*Uc[i] - Uf[i] + vp2*dt2*((1.0f + 2.0f*epsilon[i])*c2 + s2 + Sd)*pxx + vp2*dt2*((1.0f + 2.0f*epsilon[i])*s2 + c2 + Sd)*pzz - 2.0f*epsilon[i]*vp2*dt2*sin2th*pxz;
+        Uf[i] = 2.0f*Uc[i] - Uf[i] + vp2*dt2*((1.0f + 2.0f*eps)*c2 + s2 + Sd)*pxx + vp2*dt2*((1.0f + 2.0f*eps)*s2 + c2 + Sd)*pzz - 2.0f*eps*vp2*dt2*sin2th*pxz;
         
         if (ix < N_abc){
             Uf[i] *= A[ix];
