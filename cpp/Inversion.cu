@@ -2,6 +2,8 @@
 #include <cstring>
 #include <algorithm>
 
+constexpr float al_beta = 0.1f;
+
 Inversion::Inversion(Survey* parameters, Modeling* modeling, Migration* migration)
 {
     pmt = parameters;
@@ -26,6 +28,8 @@ void Inversion::InitializeInversionFields(){
     cudaMallocHost((void**)&grad_vpnew_h,n_model * sizeof(float));
     cudaMallocHost((void**)&p_vp,n_model * sizeof(float));
     cudaMalloc((void**)&residual, n_seis * sizeof(float));
+    cudaMalloc((void**)&lambda, pmt->Nshot * n_seis * sizeof(float));
+    cudaMemset(lambda, 0, pmt->Nshot * n_seis * sizeof(float));
     cudaMalloc((void**)&residual_buffer, n_seis * sizeof(float));
     cudaMalloc((void**)&slowness2, n_model_exp * sizeof(float));
 
@@ -72,6 +76,7 @@ void Inversion::freeMemory(){
     cudaFreeHost(grad_vpnew_h);
     cudaFreeHost(p_vp);
     cudaFree(residual);
+    cudaFree(lambda);
     cudaFree(residual_buffer);
     cudaFree(slowness2);
 
@@ -137,7 +142,8 @@ float Inversion::ObjectiveFunction(){
             }
             std::swap(mdl->current, mdl->future);
         }
-        computeObjectiveFunction<<<XBlocks, nThreads,0,mdl->compute_stream>>>(X, residual, mdl->seismogram, pmt->nt_data, pmt->Nrec);
+        const float* lambda_shot = lambda + shot * n_seis;
+        computeAugmentedObjective<<<XBlocks, nThreads,0,mdl->compute_stream>>>(X, residual, lambda_shot, mdl->seismogram,al_beta, pmt->nt_data, pmt->Nrec);
         if(shot + 1 < pmt->Nshot){
             readObsSeismogram(shot + 1, obs_buffer);
             cudaMemcpyAsync(residual_buffer, obs_buffer, n_seis * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -305,8 +311,8 @@ float Inversion::calculateGradientCheckpoint(){
             }
             std::swap(mdl->current,mdl->future);
         }
-
-        computeObjectiveFunction<<<XBlocks,nThreads,0,mdl->compute_stream>>>(X, residual, mdl->seismogram, pmt->nt_data, pmt->Nrec);
+        float* lambda_shot = lambda + shot * n_seis;
+        prepareAugmentedAdjointSource<<<XBlocks, nThreads, 0, mdl->compute_stream>>>(X, residual, lambda_shot, mdl->seismogram, al_beta, pmt->nt_data, pmt->Nrec);
         if(shot + 1 < pmt->Nshot){
             readObsSeismogram(shot + 1, obs_buffer);
             cudaMemcpyAsync(residual_buffer, obs_buffer, n_seis * sizeof(float), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -566,21 +572,21 @@ float Inversion::calculateMultiparameterGradient(const bool update_eps, const bo
         cudaMemcpy(gradient_theta, theta_grad, n_model*sizeof(float), cudaMemcpyDeviceToHost);
     }
 
-    #pragma omp parallel for
-    for(int i = 0; i < n_model; i++){
-        if(water_mask[i]){
-            gradient_vp[i] = 0.0f;
-            if(update_eps){
-                gradient_eps[i] = 0.0f;
-            }
-            if(update_delta){
-                gradient_delta[i] = 0.0f;
-            }
-            if(update_theta){
-                gradient_theta[i] = 0.0f;
-            }
-        }
-    }
+    // #pragma omp parallel for
+    // for(int i = 0; i < n_model; i++){
+    //     if(water_mask[i]){
+    //         gradient_vp[i] = 0.0f;
+    //         if(update_eps){
+    //             gradient_eps[i] = 0.0f;
+    //         }
+    //         if(update_delta){
+    //             gradient_delta[i] = 0.0f;
+    //         }
+    //         if(update_theta){
+    //             gradient_theta[i] = 0.0f;
+    //         }
+    //     }
+    // }
 
     pmt->multiparameter = multiparameter;
     
@@ -1168,8 +1174,8 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
     }
 
     const int n_model = pmt->nx*pmt->nz;
-    const float eps_start = 0.50f;
-    const float delta_start = 0.75f;
+    const float eps_start = 0.0f;
+    const float delta_start = 0.0f;
     const float theta_start = 0.85f;
 
     const int eps_first_itr = 1 + static_cast<int>(std::ceil(eps_start*(pmt->niter - 1)));
@@ -1189,6 +1195,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         std::cout << std::defaultfloat << "info: FWI frequency " << fmax << std::endl;
 
         adjustfmax(fmax);
+        cudaMemset(lambda, 0, pmt->Nshot * pmt->Nrec * pmt->nt_data * sizeof(float));
 
         s_vp_store.clear();
         y_vp_store.clear();
@@ -1202,9 +1209,9 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
         s_theta_store.clear();
         y_theta_store.clear();
 
-        float X_current = calculateMultiparameterGradient(false,false,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
+        float X_current = calculateMultiparameterGradient(true,true,false,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
         const float g_vp_max0 = getGradientScale(grad_vp_h);
-        scaleGradient(grad_vp_h,g_vp_max0);
+        // scaleGradient(grad_vp_h,g_vp_max0);
 
         float g_eps_max0 = 1.0f;
         float g_delta_max0 = 1.0f;
@@ -1236,7 +1243,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             }
 
             if(iteration == eps_first_itr || iteration == delta_first_itr || (pmt->approximation == "TTI" && iteration == theta_first_itr)){
-                X_current = calculateMultiparameterGradient(update_eps,update_delta,update_theta,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
+                // X_current = calculateMultiparameterGradient(update_eps,update_delta,update_theta,grad_vp_h,grad_eps_h,grad_delta_h,grad_theta_h);
 
                 scaleGradient(grad_vp_h,g_vp_max0);
 
@@ -1296,6 +1303,14 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             if(update_theta){
                 twoLoopRecursion(grad_theta_h,p_theta,s_theta_store,y_theta_store);
             }
+
+            // #pragma omp parallel for
+            // for(int i = 0; i < n_model; ++i){
+            //     p_vp[i] = -grad_vp_h[i];
+            //     if(update_eps)   p_eps[i] = -grad_eps_h[i];
+            //     if(update_delta) p_delta[i] = -grad_delta_h[i];
+            //     if(update_theta) p_theta[i] = -grad_theta_h[i];
+            // }
 
             const float beta_vp = armijolinesearch("vp",vp_h,grad_vp_h,p_vp,X_current,s_vp_store.empty(),g_vp_max0);
 
@@ -1446,7 +1461,33 @@ __global__ void computeObjectiveFunction(float* X, float* __restrict__ residual,
     if (i < n_seis){
         const float r = residual[i] - calculated[i];
         residual[i] = r;
-        atomicAdd(X, 0.5f * static_cast<float>(r) * static_cast<float>(r));
+        atomicAdd(X, 0.5f * r * r);
+    }
+}
+
+__global__ void computeAugmentedObjective(float* X, float* __restrict__ residual, const float* __restrict__ lambda_shot, const float* __restrict__ calculated, const float beta, const int nt, const int Nrec){
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int n_seis = nt * Nrec;
+
+    if(i < n_seis){
+        const float r = calculated[i] - residual[i];
+        residual[i] = r;
+        atomicAdd(X, 0.5f * beta * r * r + lambda_shot[i] * r);
+    }
+}
+
+__global__ void prepareAugmentedAdjointSource(float* X, float* __restrict__ residual, float* __restrict__ lambda_shot, const float* __restrict__ calculated, const float beta, const int nt, const int Nrec){
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int n_seis = nt * Nrec;
+
+    if(i < n_seis){
+        const float r = calculated[i] - residual[i];
+        const float lambda_half = lambda_shot[i] + beta * r;
+
+        lambda_shot[i] = lambda_half;
+        residual[i] = lambda_half + beta * r;
+
+        atomicAdd(X, 0.5f * beta * r * r + lambda_half * r);
     }
 }
 

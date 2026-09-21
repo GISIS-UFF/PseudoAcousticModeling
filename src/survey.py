@@ -36,10 +36,10 @@ class parameters:
         self.tlag = 2.0*np.sqrt(np.pi)/self.fcut
 
         # Number of points in each direction
-        self.nx = round(self.L/self.dx)+1
-        self.nz = round(self.D/self.dz)+1
-        self.itlag = round(self.tlag / self.dt)
-        self.nt_data = round(self.T / self.dt) + 1
+        self.nx = np.round(self.L/self.dx).astype(np.int32)+1
+        self.nz = np.round(self.D/self.dz).astype(np.int32)+1
+        self.itlag = np.round(self.tlag / self.dt).astype(np.int32)
+        self.nt_data = np.round(self.T / self.dt).astype(np.int32) + 1
         self.nt = self.itlag + self.nt_data
 
         self.nx_abc = self.nx + 2*self.N_abc
@@ -106,14 +106,14 @@ class parameters:
             self.shot_x, self.rec_x = self.rec_x.copy(), self.shot_x.copy()
             self.shot_z, self.rec_z = self.rec_z.copy(), self.shot_z.copy()
 
-        self.rx = round(self.rec_x / self.dx).astype(np.int32) + self.N_abc 
-        self.rz = round(self.rec_z / self.dz).astype(np.int32) + self.N_abc 
-        self.sx = round(self.shot_x / self.dx).astype(np.int32) + self.N_abc
-        self.sz = round(self.shot_z / self.dz).astype(np.int32) + self.N_abc 
+        self.rx = np.round(self.rec_x / self.dx).astype(np.int32) + self.N_abc 
+        self.rz = np.round(self.rec_z / self.dz).astype(np.int32) + self.N_abc 
+        self.sx = np.round(self.shot_x / self.dx).astype(np.int32) + self.N_abc
+        self.sz = np.round(self.shot_z / self.dz).astype(np.int32) + self.N_abc 
             
         if self.mirror == True:
-            self.rz = round(self.rec_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
-            self.sz = round(self.shot_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
+            self.rz = np.round(self.rec_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
+            self.sz = np.round(self.shot_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
 
         self.Nrec = len(self.rec_x)
         self.Nshot = len(self.shot_x) 
