@@ -9,10 +9,8 @@ public:
     Survey();
 
     // Tipo de processamento
-    std::string unit;
     std::string approximation;
     std::string migration;
-    std::string ABC;
 
     // Discretização
     float dx;
@@ -47,14 +45,13 @@ public:
 
     // Migração
     float sigma;
-    float dvel;
-    float ratio;
     float shift;
     float window;
     float v0;
 
     bool reciprocity;
     bool mirror;
+    int idx_water;
 
     // Snapshots
     int step;
@@ -62,7 +59,6 @@ public:
     bool snap;
 
     // FWI
-    bool fwi;
     int niter;
 
     std::vector<float> freqs;
@@ -80,16 +76,6 @@ public:
     float thetamax;
 
     bool multiparameter;
-
-    // Modelos sintéticos
-    bool layer2;
-    bool layer3;
-    bool gradientmodel;
-    bool diffractor;
-    bool modelfromvp;
-    bool waterlayer;
-
-    int idx_water;
 
     // Arquivos da aquisição
     std::string rec_file;

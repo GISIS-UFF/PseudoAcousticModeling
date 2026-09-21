@@ -384,9 +384,7 @@ void Migration::solveReverseTimeMigrationOntheFly(){
     const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
     initializeMigrationFields();
     mdl->createWavelet();
-    if (pmt->ABC == "cerjan"){
-        mdl->createCerjanVector();
-    }
+    mdl->createCerjanVector();
     setModel();
     for (int shot = 0; shot < pmt->Nshot; shot++){
         std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
@@ -424,7 +422,7 @@ void Migration::solveReverseTimeMigrationCheckpoint(){
     
     initializeMigrationFields();
     mdl->createWavelet();
-    if(pmt->ABC=="cerjan") mdl->createCerjanVector();
+    mdl->createCerjanVector();
     setModel();
 
     const int n_model_exp = pmt->nx_abc*pmt->nz_abc;

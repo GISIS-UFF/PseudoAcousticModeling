@@ -42,10 +42,8 @@ void Survey::readParameters()
     std::ifstream jsonFile("../inputs/Parameters.json");
     json parameters = json::parse(jsonFile);
 
-    unit = parameters["unit"].get<std::string>();
     approximation = parameters["approximation"].get<std::string>();
     migration = parameters["migration"].get<std::string>();
-    ABC = parameters["ABC"].get<std::string>();
     dx = parameters["dx"].get<float>();
     dz = parameters["dz"].get<float>();
     dt = parameters["dt"].get<float>();
@@ -55,14 +53,11 @@ void Survey::readParameters()
     N_abc = parameters["N_abc"].get<int>();
     fcut = parameters["fcut"].get<float>();
     sigma = parameters["sigma"].get<float>();
-    dvel = parameters["dvel"].get<float>();
-    ratio = parameters["ratio"].get<float>();
     shift = parameters["shift"].get<float>();
     window = parameters["window"].get<float>();
     v0 = parameters["v0"].get<float>();
     step = parameters["step"].get<int>();
     last_save = parameters["last_save"].get<int>();
-    fwi = parameters["fwi"].get<bool>();
     niter = parameters["niter"].get<int>();
     freqs = parameters["freqs"].get<std::vector<float>>();
     vmin = parameters["vmin"].get<float>();
@@ -76,12 +71,6 @@ void Survey::readParameters()
     multiparameter = parameters["multiparameter"].get<bool>();
     reciprocity = parameters["reciprocity"].get<bool>();
     mirror = parameters["mirror"].get<bool>();
-    layer2 = parameters["layer2"].get<bool>();
-    layer3 = parameters["layer3"].get<bool>();
-    gradientmodel = parameters["gradientmodel"].get<bool>();
-    diffractor = parameters["diffractor"].get<bool>();
-    modelfromvp = parameters["modelfromvp"].get<bool>();
-    waterlayer = parameters["waterlayer"].get<bool>();
     idx_water = parameters["idx_water"].get<int>();
     snap = parameters["snap"].get<bool>();
     rec_file = parameters["rec_file"].get<std::string>();

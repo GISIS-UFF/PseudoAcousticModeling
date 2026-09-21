@@ -2,7 +2,6 @@ import keyword
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from utils import ricker
 import pandas as pd
 import json
 import os
@@ -225,7 +224,7 @@ class plotting:
 
     def plotImageTrace(self, filename1,filename2, laplacian, ix=None, perc=99):
         img = np.fromfile(filename1, dtype=np.float32).reshape(self.pmt.nz, self.pmt.nx)
-        vp = np.fromfile(filename2, dtype=np.float32).reshape(self.pmt.nx,self.pmt.nz).T
+        vp = np.fromfile(filename2, dtype=np.float32).reshape(self.pmt.nz,self.pmt.nx)
         if laplacian == True:
             img = self.laplacian_filter(img)
 
@@ -259,20 +258,11 @@ class plotting:
         plt.legend()
         plt.show()
 
-    def viewSourceWavelet(self):
-        self.source = ricker(self.pmt.fcut, self.pmt.t, self.pmt.tlag)
-        self.source = self.source * (self.pmt.dt * self.pmt.dt)/(self.pmt.dx*self.pmt.dz)
-        plt.figure()
-        plt.plot(self.pmt.t, self.source)
-        plt.title("Source Wavelet")
-        plt.xlabel("Time (s)")
-        plt.ylabel("Amplitude")
-        plt.grid()
-        plt.show()
-
     def viewSeismogramComparison(self,perc, offset, filename1, filename2, title="Seismogram Difference"):
-        seismo1 = np.fromfile(filename1, dtype=np.float32).reshape(self.pmt.nt, self.pmt.Nrec)
-        seismo2 = np.fromfile(filename2, dtype=np.float32).reshape(self.pmt.nt, self.pmt.Nrec)
+        seismo1 = np.fromfile(filename1, dtype=np.float32).reshape(self.pmt.nt_data, self.pmt.Nrec)
+        seismo2 = np.fromfile(filename2, dtype=np.float32).reshape(self.pmt.nt_data, self.pmt.Nrec)
+
+        time = np.arange(self.pmt.nt_data) * self.pmt.dt
 
         # Calcula offsets para este tiro
         offsets = np.abs(self.pmt.rec_x - self.pmt.shot_x[0])
@@ -281,8 +271,8 @@ class plotting:
         rec_idx = np.argmin(np.abs(offsets - offset))
 
         plt.figure(figsize=(5, 5))
-        plt.plot(self.pmt.T,seismo1[:,rec_idx], label = "VTI")
-        plt.plot(self.pmt.T,seismo2[:,rec_idx], label = "VTI NEW")
+        plt.plot(time,seismo1[:,rec_idx], label = "VTI")
+        plt.plot(time,seismo2[:,rec_idx], label = "VTI NEW")
         plt.legend()
         plt.ylabel("Amplitude")
         plt.title(f"Offset: {offsets[rec_idx]}m")

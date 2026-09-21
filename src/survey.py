@@ -13,10 +13,8 @@ class parameters:
             self.parameters = json.load(f)
 
         # Approximation type
-        self.unit = self.parameters["unit"] 
         self.approximation = self.parameters["approximation"]
-        self.migration = self.parameters["migration"]
-        self.ABC = self.parameters["ABC"]
+
         
         # Discretization self.parameters
         self.dx   = self.parameters["dx"]
@@ -38,10 +36,10 @@ class parameters:
         self.tlag = 2.0*np.sqrt(np.pi)/self.fcut
 
         # Number of points in each direction
-        self.nx = int(self.L/self.dx)+1
-        self.nz = int(self.D/self.dz)+1
-        self.itlag = int(self.tlag / self.dt)
-        self.nt_data = int(self.T / self.dt) + 1
+        self.nx = round(self.L/self.dx)+1
+        self.nz = round(self.D/self.dz)+1
+        self.itlag = round(self.tlag / self.dt)
+        self.nt_data = round(self.T / self.dt) + 1
         self.nt = self.itlag + self.nt_data
 
         self.nx_abc = self.nx + 2*self.N_abc
@@ -85,31 +83,11 @@ class parameters:
         self.diffractor =  self.parameters['diffractor']
         self.modelfromvp =  self.parameters['modelfromvp']
         self.waterlayer = self.parameters['waterlayer']
-        self.idx_water = self.parameters['idx_water']
         
         #migration parameters
-        self.shift = self.parameters['shift']
-        self.window = self.parameters['window']
-        self.v0 = self.parameters['v0']
-        self.sigma = self.parameters['sigma'] 
-        self.dvel = self.parameters['dvel']
-        self.ratio = self.parameters['ratio']
         self.mirror = self.parameters['mirror']
         self.reciprocity = self.parameters['reciprocity']
-
-        #FWI parameters
-        self.niter = self.parameters['niter']
-        self.fwi = self.parameters['fwi']
-        self.freqs = self.parameters['freqs']
-        self.vmax = self.parameters['vmax']
-        self.vmin = self.parameters['vmin']
-        self.epsmin = self.parameters['epsmin']
-        self.epsmax = self.parameters['epsmax']
-        self.deltamin = self.parameters['deltamin']
-        self.deltamax = self.parameters['deltamax']
-        self.thetamin = self.parameters['thetamin']
-        self.thetamax = self.parameters['thetamax']
-        self.multiparameter = self.parameters['multiparameter']
+        self.idx_water = self.parameters['idx_water']
 
     def readAcquisitionGeometry(self):        
         # Read receiver and source coordinates from CSV files
@@ -128,14 +106,14 @@ class parameters:
             self.shot_x, self.rec_x = self.rec_x.copy(), self.shot_x.copy()
             self.shot_z, self.rec_z = self.rec_z.copy(), self.shot_z.copy()
 
-        self.rx = np.int32(self.rec_x / self.dx) + self.N_abc 
-        self.rz = np.int32(self.rec_z / self.dz) + self.N_abc 
-        self.sx = np.int32(self.shot_x / self.dx) + self.N_abc
-        self.sz = np.int32(self.shot_z / self.dz) + self.N_abc 
+        self.rx = round(self.rec_x / self.dx).astype(np.int32) + self.N_abc 
+        self.rz = round(self.rec_z / self.dz).astype(np.int32) + self.N_abc 
+        self.sx = round(self.shot_x / self.dx).astype(np.int32) + self.N_abc
+        self.sz = round(self.shot_z / self.dz).astype(np.int32) + self.N_abc 
             
         if self.mirror == True:
-            self.rz = np.int32(self.rec_z/self.dz) + self.N_abc - self.idx_water
-            self.sz = np.int32(self.shot_z/self.dz) + self.N_abc - self.idx_water
+            self.rz = round(self.rec_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
+            self.sz = round(self.shot_z/self.dz).astype(np.int32) + self.N_abc - self.idx_water
 
         self.Nrec = len(self.rec_x)
         self.Nshot = len(self.shot_x) 

@@ -21,9 +21,8 @@ void Modeling::freeMemory()
     cudaFree(seismogram);
     cudaStreamDestroy(copy_stream);
     cudaStreamDestroy(compute_stream);
-    if (pmt->ABC == "cerjan"){
-        cudaFree(A);
-    }
+    cudaFree(A);
+    
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
         cudaFree(epsilon);
         cudaFree(delta);
@@ -50,11 +49,7 @@ void Modeling::initializeFields()
     cudaStreamCreate(&compute_stream);
 
     cudaMalloc((void**)&source, pmt->nt * sizeof(float));
-
-    if (pmt->ABC == "cerjan"){
-        cudaMalloc((void**)&A, pmt->N_abc * sizeof(float));
-    }
-
+    cudaMalloc((void**)&A, pmt->N_abc * sizeof(float));
     cudaMalloc((void**)&vp, n_model_exp * sizeof(float));
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
@@ -433,9 +428,7 @@ void Modeling::solveWaveEquation(){
     std::cout << "info: Solving " + pmt->approximation + " wave equation" << std::endl;
     initializeFields();
     createWavelet();
-    if (pmt->ABC == "cerjan"){
-        createCerjanVector();
-    }
+    createCerjanVector();
     setModel();
     for (int shot = 0; shot < pmt->Nshot; shot++){
         std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;

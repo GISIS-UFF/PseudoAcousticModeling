@@ -969,7 +969,7 @@ void Inversion::adjustfmax(const float fmax){
 
     pmt->fcut = fmax;
     pmt->tlag = 2.0f*std::sqrt(pi)/pmt->fcut;
-    pmt->itlag = static_cast<int>(pmt->tlag/pmt->dt);
+    pmt->itlag = std::round(pmt->tlag/pmt->dt);
     pmt->nt = pmt->itlag + pmt->nt_data;
     cudaFree(mdl->source);
     cudaMalloc(&mdl->source, pmt->nt * sizeof(float));
@@ -1102,10 +1102,7 @@ void Inversion::solveFullWaveformInversionMonoparameter(){
     const std::string history_file = "../outputs/history.txt";
     std::ofstream history_stream(history_file);
 
-    if (pmt->ABC == "cerjan"){
-        mdl->createCerjanVector();
-    }
-
+    mdl->createCerjanVector();
     for(const float fmax : pmt->freqs){
         std::cout << "info: FWI frequency " << fmax <<std::endl;
         adjustfmax(fmax);
@@ -1171,9 +1168,9 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
     }
 
     const int n_model = pmt->nx*pmt->nz;
-    const float eps_start = 0.0f;
-    const float delta_start = 0.50f;
-    const float theta_start = 0.75f;
+    const float eps_start = 0.50f;
+    const float delta_start = 0.75f;
+    const float theta_start = 0.85f;
 
     const int eps_first_itr = 1 + static_cast<int>(std::ceil(eps_start*(pmt->niter - 1)));
     const int delta_first_itr = 1 + static_cast<int>(std::ceil(delta_start*(pmt->niter - 1)));
@@ -1186,9 +1183,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
     const std::string history_file = "../outputs/history.txt";
     std::ofstream history_stream(history_file);
 
-    if(pmt->ABC == "cerjan"){
-        mdl->createCerjanVector();
-    }
+    mdl->createCerjanVector();
 
     for(const float fmax : pmt->freqs){
         std::cout << std::defaultfloat << "info: FWI frequency " << fmax << std::endl;
@@ -1423,8 +1418,17 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             }
 
             if(update_theta){
+                float* theta_deg = new float[n_model];
+
+                const float rad2deg = 180.0f / 3.14159265358979323846f;
+
+                #pragma omp parallel for
+                for(int i = 0; i < n_model; i++){
+                    theta_deg[i] = theta_h[i] * rad2deg;
+                }
                 const std::string theta_model_file = pmt->estimatedmodelsFolder+"fwi_theta_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_itr"+std::to_string(iteration)+"_freq"+fcut_stream.str()+".bin";
-                saveModel(theta_model_file,theta_h);
+                saveModel(theta_model_file,theta_deg);
+                delete[] theta_deg;
             }
         }
     }
