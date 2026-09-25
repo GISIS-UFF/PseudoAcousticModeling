@@ -21,8 +21,14 @@ public:
     float* delta = nullptr;
     float* theta = nullptr;
 
+    float* dm = nullptr;
+    float* depsilon = nullptr;
+    float* ddelta = nullptr;
+
     float* current = nullptr;
     float* future = nullptr;
+    float* current_born = nullptr;
+    float* future_born = nullptr;
 
     float* seismogram = nullptr;
 
@@ -61,3 +67,5 @@ __global__ void storeSeismogram(const float* current, float* seismogram, const i
 __global__ void updateWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc);
 __global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc );
 __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta,  float* __restrict__ A, int N_abc);
+__global__ void updateWaveEquationBorn(float* __restrict__ dUf, float* __restrict__ dUc, float* __restrict__ U0f, float* __restrict__ U0c, const float* __restrict__ vp, const float* __restrict__ dm, int nz, int nx, float dz, float dx, float dt, float* __restrict__ A, int N_abc);
+__global__ void updateWaveEquationVTIBorn(float* __restrict__ dUf, float* __restrict__ dUc, float* __restrict__ U0f, float* __restrict__ U0c, const float* __restrict__ vp, const float* __restrict__ epsilon, const float* __restrict__ delta, const float* __restrict__ dm, const float* __restrict__ depsilon, const float* __restrict__ ddelta, int nz, int nx, float dz, float dx, float dt, float* __restrict__ A, int N_abc);

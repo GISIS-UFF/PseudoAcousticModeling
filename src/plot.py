@@ -4,18 +4,18 @@ from survey import parameters
 pmt = parameters("../inputs/Parameters.json")
 plt = plotting(pmt)
 
-plt.viewModel(f"/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/layer2epsilon_Nz301_Nx301.bin")
+plt.viewModel(f"../inputs/models/layer2vp_Nz301_Nx301.bin")
 # plt.viewHistory()
 # plt.viewSnapshot("VTIforward_shot_1_Nx301_Nz301_Nt4001_frame_600.bin","/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin")
 # plt.movieSnapshot(f"VTIforward_shot_15_Nx301_Nz301_Nt4178_frame", f"/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/diffractorvp_Nz301_Nx301.bin",backward=False,interval=100,savegif=False)
-plt.viewSeismogram(f"../outputs/seismograms/seismogram_shot_15_Nt4001_Nrec170_fcut20.0.bin", perc=90)
+plt.viewSeismogram(f"../outputs/seismograms/seismogram_shot_15_Nt4001_Nrec170_fcut20.0.bin", perc=99)
 # plt.viewSeismogramComparison(95,0,"../outputs/seismograms/VTIseismogram_shot_1_Nt20001_Nrec501.bin", "../outputs/seismograms/VTINewseismogram_shot_1_Nt20001_Nrec501.bin")
-plt.viewImage(f"../outputs/gradients/vp_gradient_fwi_iter_1_VTI_Nx301_Nz301_freq20.0.bin",laplacian=True,perc=99)
+# plt.viewImage(f"../outputs/gradients/delta_gradient_fwi_iter_4_VTI_Nx601_Nz301_freq20.0.bin",laplacian=True,perc=99)
 # plt.plotImageTrace(f"{pmt.migratedimageFolder}migrated_image_{pmt.approximation}_Nx{pmt.nx}_Nz{pmt.nz}.bin", f"../inputs/layer2vp_Nz{pmt.nz}_Nx{pmt.nx}.bin", laplacian = True, ix=None, perc=99)
 # plt.movieSnapshot(f"VTIbackward_shot_10_Nx301_Nz301_Nt5178_frame", f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin",backward=True,interval=200,savegif=True)
 
-# import numpy as np
-# import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
 
 # model_smooth = np.fromfile("../inputs/models/fwi_vp_smooth_acoustic_Nx681_Nz141.bin", dtype=np.float32).reshape(pmt.nz,pmt.nx)
 # model_ref = np.fromfile("/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/vp_marmousi-ii_shape_(2801, 13601)_dh25m_Nz141_Nx681.bin", dtype=np.float32).reshape(pmt.nz,pmt.nx)
@@ -30,3 +30,43 @@ plt.viewImage(f"../outputs/gradients/vp_gradient_fwi_iter_1_VTI_Nx301_Nz301_freq
 # plt.legend()
 # plt.show()
 
+sism = np.fromfile("../outputs/seismograms/fundo_seismogram_shot_15_Nt4001_Nrec170_fcut20.0.bin", dtype=np.float32).reshape(pmt.nt_data,pmt.Nrec) 
+sism2 = np.fromfile("../outputs/seismograms/seismogram_shot_15_Nt4001_Nrec170_fcut20.0.bin", dtype=np.float32).reshape(pmt.nt_data,pmt.Nrec) 
+born = np.fromfile("../outputs/seismograms/born_seismogram_shot_15_Nt4001_Nrec170_fcut20.0.bin", dtype=np.float32).reshape(pmt.nt_data,pmt.Nrec) 
+dif = sism2 - sism
+dif2 = dif - born
+plt.figure(figsize=(5, 5))
+perc = np.percentile(np.abs(sism), 99)
+plt.imshow(sism, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, pmt.Nrec, pmt.T, 0])
+plt.colorbar(label='Amplitude')
+plt.title("Fundo")
+plt.ylabel("Time (s)")
+
+plt.figure(figsize=(5, 5))
+perc = np.percentile(np.abs(sism2), 99)
+plt.imshow(sism2, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, pmt.Nrec, pmt.T, 0])
+plt.colorbar(label='Amplitude')
+plt.title("Fundo com difrator")
+plt.ylabel("Time (s)")
+
+plt.figure(figsize=(5, 5))
+perc = np.percentile(np.abs(dif), 99)
+plt.imshow(dif, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, pmt.Nrec, pmt.T, 0])
+plt.colorbar(label='Amplitude')
+plt.title("Fundo - fundo com difrator")
+plt.ylabel("Time (s)")
+
+plt.figure(figsize=(5, 5))
+perc = np.percentile(np.abs(dif2), 99)
+plt.imshow(born, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, pmt.Nrec, pmt.T, 0])
+plt.colorbar(label='Amplitude')
+plt.title("Born")
+plt.ylabel("Time (s)")
+
+plt.figure(figsize=(5, 5))
+perc = np.percentile(np.abs(dif2), 99)
+plt.imshow(dif2, aspect='auto', cmap='gray', vmin=-perc, vmax=perc, extent=[0, pmt.Nrec, pmt.T, 0])
+plt.colorbar(label='Amplitude')
+plt.title("Born - fundo - fundo com difrator")
+plt.ylabel("Time (s)")
+plt.show()

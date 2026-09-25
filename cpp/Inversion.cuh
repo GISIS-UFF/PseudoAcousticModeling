@@ -18,7 +18,6 @@ public:
 
     float* X = nullptr;
     float* residual = nullptr;
-    float* lambda = nullptr;
     float* residual_buffer = nullptr;
     float* slowness2 = nullptr;
     float* past_field = nullptr;
@@ -93,8 +92,6 @@ public:
     void updateLBFGSHistory(const float* model, const float* model_new, const float* gradient, const float* gradient_new, std::vector<std::vector<float>>& s_store, std::vector<std::vector<float>>& y_store);
 };
 
-__global__ void prepareAugmentedAdjointSource(float* X, float* __restrict__ residual, float* __restrict__ lambda_shot, const float* __restrict__ calculated, const float beta, const int nt, const int Nrec);
-__global__ void computeAugmentedObjective(float* X, float* __restrict__ residual, const float* __restrict__ lambda_shot, const float* __restrict__ calculated, const float beta, const int nt, const int Nrec);
 __global__ void computeObjectiveFunction(float* X, float* __restrict__ residual, const float* calculated, int nt, int Nrec);
 __global__ void slowness2ToVp(const float* slowness2, float* vp, int nx, int nz);
 __global__ void updateAdjointWaveEquationandGradient(float* Uf, float* Uc, const float* Pp, const float* Pc, const float* Pf, float* vp_grad, const float* vp, int nz, int nx, float dz, float dx, float dt, const float* A, int N_abc);

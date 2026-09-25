@@ -16,8 +16,13 @@ void Modeling::freeMemory()
     cudaFree(rz);
     cudaFree(source);
     cudaFree(vp);
+    cudaFree(dm);
+    cudaFree(depsilon);
+    cudaFree(ddelta);
     cudaFree(current);
     cudaFree(future);
+    cudaFree(current_born);
+    cudaFree(future_born);
     cudaFree(seismogram);
     cudaStreamDestroy(copy_stream);
     cudaStreamDestroy(compute_stream);
@@ -63,6 +68,8 @@ void Modeling::initializeFields()
 
     cudaMalloc((void**)&current,n_model_exp * sizeof(float));
     cudaMalloc((void**)&future,n_model_exp * sizeof(float));
+    cudaMalloc((void**)&current_born,n_model_exp * sizeof(float));
+    cudaMalloc((void**)&future_born,n_model_exp * sizeof(float));
     cudaMalloc((void**)&seismogram,n_seis * sizeof(float));
 
     if (pmt->snap == true){
@@ -118,6 +125,8 @@ void Modeling::resetFields(){
     const int n_seis = pmt->Nrec * pmt->nt_data;
     cudaMemset(current, 0, n_model_exp * sizeof(float));
     cudaMemset(future, 0, n_model_exp * sizeof(float));
+    cudaMemset(current_born, 0, n_model_exp * sizeof(float));
+    cudaMemset(future_born, 0, n_model_exp * sizeof(float));
     cudaMemset(seismogram, 0, n_seis * sizeof(float));
 }
 
@@ -335,6 +344,13 @@ void Modeling::setModel(){
 
     importBin(pmt->vpFile, vp_h, n_model);
     expandModel(vp_h, vp_exp_h);
+    const int ix = pmt->N_abc + pmt->nx / 2;
+    const int iz = pmt->N_abc + pmt->nz / 2;
+    const int i = iz * pmt->nx_abc + ix;
+
+    const float dm_ponto = 1e-9f; // mesmo valor usado no Born
+    const float v0 = vp_exp_h[i];
+    vp_exp_h[i] = 1.0f / sqrtf(1.0f / (v0 * v0) + dm_ponto);
     cudaMemcpy(vp, vp_exp_h, n_model_exp * sizeof(float), cudaMemcpyHostToDevice);
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
@@ -413,11 +429,38 @@ void Modeling::saveSeismogram(const int shot){
 }
 
 void Modeling::forward_step(const int k){
+    if (dm == nullptr){
+        const int n = pmt->nx_abc * pmt->nz_abc;
+        const size_t bytes = n * sizeof(float);
+
+        cudaMalloc((void**)&dm, bytes);
+        cudaMalloc((void**)&depsilon, bytes);
+        cudaMalloc((void**)&ddelta, bytes);
+
+        cudaMemset(dm, 0, bytes);
+        cudaMemset(depsilon, 0, bytes);
+        cudaMemset(ddelta, 0, bytes);
+
+        // Mesmo ponto da malha física para as três perturbações.
+        const int ix = pmt->N_abc + pmt->nx / 2;
+        const int iz = pmt->N_abc + pmt->nz / 2;
+        const int i = iz * pmt->nx_abc + ix;
+
+        const float xm = 1e-9f;  // Δm, em (s/m)²
+        const float xe = 1e-3f;  // Δepsilon
+        const float xd = 1e-3f;  // Δdelta
+
+        cudaMemcpy(dm + i, &xm, sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(depsilon + i, &xe, sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(ddelta + i, &xd, sizeof(float), cudaMemcpyHostToDevice);
+    }
     if (pmt->approximation == "acoustic"){
-        updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        updateWaveEquationBorn<<<expBlocks, nThreads, 0, compute_stream>>>(future_born, current_born,future, current,vp,dm, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        // updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
-        updateWaveEquationVTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
+         updateWaveEquationVTIBorn<<<expBlocks, nThreads, 0, compute_stream>>>(future_born, current_born,future, current,vp, epsilon, delta, dm, depsilon, ddelta, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        // updateWaveEquationVTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
         updateWaveEquationTTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
@@ -456,6 +499,7 @@ void Modeling::solveWaveEquation(){
                 cudaStreamSynchronize(copy_stream);
                 cudaMemcpyAsync(snapshot,d_snapshot,pmt->nx * pmt->nz * sizeof(float),cudaMemcpyDeviceToHost,copy_stream);
             }
+            std::swap(current_born, future_born);
             std::swap(current, future);
         }
         if (pmt->snap)
@@ -607,7 +651,7 @@ __global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict_
 
         const float num = -2.0f * (eps - del) * px2pz2;
         const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
-        const float Sd =num / (den + 1e-37f);  
+        const float Sd = num / (den + 1e-37f);  
 
         Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0f+ 2.0f*eps) + Sd) * pxx + vp2 * dt2 *(1.0f + Sd) * pzz;
 
@@ -741,5 +785,212 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
             Uf[i] *= A[nz - 1 - iz];
             Uc[i] *= A[nz - 1 - iz];
         }
+    }
+}
+
+__global__ void updateWaveEquationBorn(float* __restrict__ dUf,  float* __restrict__ dUc, float* __restrict__ U0f, float* __restrict__ U0c, const float* __restrict__ vp, const float* __restrict__ dm, int nz, int nx, float dz, float dx, float dt, float* __restrict__ A, int N_abc){
+    const float c0 = -2.847222222222f;
+    const float c1 =  1.6f;
+    const float c2 = -0.2f;
+    const float c3 =  0.02539682539f;
+    const float c4 = -0.00178571428f;
+
+    const float inv_dx2 = 1.0f / (dx * dx);
+    const float inv_dz2 = 1.0f / (dz * dz);
+    const float dt2 = dt * dt;
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nz * nx) return;
+
+    int iz = i/nx;
+    int ix = i%nx;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4){
+        
+        float du_xx = (c0 * dUc[i]
+                + c1 * (dUc[i + 1] + dUc[i - 1])
+                + c2 * (dUc[i + 2] + dUc[i - 2])
+                + c3 * (dUc[i + 3] + dUc[i - 3])
+                + c4 * (dUc[i + 4] + dUc[i - 4])) * inv_dx2;
+        float du_zz = (c0 * dUc[i]
+                + c1 * (dUc[i + nx] + dUc[i - nx])
+                + c2 * (dUc[i + 2 * nx] + dUc[i - 2 * nx])
+                + c3 * (dUc[i + 3 * nx] + dUc[i - 3 * nx])
+                + c4 * (dUc[i + 4 * nx] + dUc[i - 4 * nx])) * inv_dz2;
+
+        float u0_xx = (c0 * U0c[i]
+                + c1 * (U0c[i + 1] + U0c[i - 1])
+                + c2 * (U0c[i + 2] + U0c[i - 2])
+                + c3 * (U0c[i + 3] + U0c[i - 3])
+                + c4 * (U0c[i + 4] + U0c[i - 4])) * inv_dx2;
+        float u0_zz = (c0 * U0c[i]
+                + c1 * (U0c[i + nx] + U0c[i - nx])
+                + c2 * (U0c[i + 2 * nx] + U0c[i - 2 * nx])
+                + c3 * (U0c[i + 3 * nx] + U0c[i - 3 * nx])
+                + c4 * (U0c[i + 4 * nx] + U0c[i - 4 * nx])) * inv_dz2;
+
+        float vp2 = vp[i] * vp[i];
+        float vp4 = vp2 * vp2;
+        float propagation = vp2 * (du_xx + du_zz);
+        float born_source = -vp4 * dm[i] * (u0_xx + u0_zz);
+        
+        U0f[i] = vp2 * dt2 * (u0_xx + u0_zz) + 2.0f * U0c[i] - U0f[i];
+        dUf[i] = 2.0f * dUc[i] - dUf[i] + dt2 * (propagation + born_source);
+
+        if (ix < N_abc){
+            U0f[i] *= A[ix];
+            U0c[i] *= A[ix];
+            dUf[i] *= A[ix];
+            dUc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            U0f[i] *= A[nx - 1 - ix];
+            U0c[i] *= A[nx - 1 - ix];
+            dUf[i] *= A[nx - 1 - ix];
+            dUc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            U0f[i] *= A[iz];
+            U0c[i] *= A[iz];
+            dUf[i] *= A[iz];
+            dUc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            U0f[i] *= A[nz - 1 - iz];
+            U0c[i] *= A[nz - 1 - iz];
+            dUf[i] *= A[nz - 1 - iz];
+            dUc[i] *= A[nz - 1 - iz];
+        }
+    }
+}
+
+__global__ void updateWaveEquationVTIBorn(float* __restrict__ dUf, float* __restrict__ dUc, float* __restrict__ U0f, float* __restrict__ U0c, const float* __restrict__ vp, const float* __restrict__ epsilon, const float* __restrict__ delta, const float* __restrict__ dm, const float* __restrict__ depsilon, const float* __restrict__ ddelta, int nz, int nx, float dz, float dx, float dt, float* __restrict__ A, int N_abc){
+    const float c0 = -2.847222222222f;
+    const float c1 =  1.6f;
+    const float c2 = -0.2f;
+    const float c3 =  0.02539682539f;
+    const float c4 = -0.00178571428f;
+    const float a1 =  0.8f;
+    const float a2 = -0.2f;
+    const float a3 =  0.03809523809f;
+    const float a4 = -0.00357142857f;
+
+    const float inv_dx  = 1.0f / dx;
+    const float inv_dz  = 1.0f / dz;
+    const float inv_dx2 = 1.0f / (dx * dx);
+    const float inv_dz2 = 1.0f / (dz * dz);
+    const float dt2 = dt * dt;
+    
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= nz * nx) return;
+
+    int iz = i / nx;
+    int ix = i % nx;
+
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4){
+        
+        float u0_xx = (c0 * U0c[i]
+                + c1 * (U0c[i + 1] + U0c[i - 1])
+                + c2 * (U0c[i + 2] + U0c[i - 2])
+                + c3 * (U0c[i + 3] + U0c[i - 3])
+                + c4 * (U0c[i + 4] + U0c[i - 4])) * inv_dx2;
+        float u0_zz = (c0 * U0c[i]
+                + c1 * (U0c[i + nx] + U0c[i - nx])
+                + c2 * (U0c[i + 2 * nx] + U0c[i - 2 * nx])
+                + c3 * (U0c[i + 3 * nx] + U0c[i - 3 * nx])
+                + c4 * (U0c[i + 4 * nx] + U0c[i - 4 * nx])) * inv_dz2;
+        float u0_x = (a1*(U0c[i+1] - U0c[i-1]) +
+                    a2*(U0c[i+2] - U0c[i-2]) +
+                    a3*(U0c[i+3] - U0c[i-3]) +
+                    a4*(U0c[i+4] - U0c[i-4])) * inv_dx;
+
+        float u0_z = (a1 * (U0c[i + nx] - U0c[i - nx]) +
+                    a2 * (U0c[i + 2*nx] - U0c[i - 2*nx]) +
+                    a3 * (U0c[i + 3*nx] - U0c[i - 3*nx]) +
+                    a4 * (U0c[i + 4*nx] - U0c[i - 4*nx])) * inv_dz;
+
+        float du_xx = (c0 * dUc[i]
+                + c1 * (dUc[i + 1] + dUc[i - 1])
+                + c2 * (dUc[i + 2] + dUc[i - 2])
+                + c3 * (dUc[i + 3] + dUc[i - 3])
+                + c4 * (dUc[i + 4] + dUc[i - 4])) * inv_dx2;
+        float du_zz = (c0 * dUc[i]
+                + c1 * (dUc[i + nx] + dUc[i - nx])
+                + c2 * (dUc[i + 2 * nx] + dUc[i - 2 * nx])
+                + c3 * (dUc[i + 3 * nx] + dUc[i - 3 * nx])
+                + c4 * (dUc[i + 4 * nx] + dUc[i - 4 * nx])) * inv_dz2;
+        float du_x = (a1*(dUc[i+1] - dUc[i-1]) +
+                    a2*(dUc[i+2] - dUc[i-2]) +
+                    a3*(dUc[i+3] - dUc[i-3]) +
+                    a4*(dUc[i+4] - dUc[i-4])) * inv_dx;
+        float du_z = (a1 * (dUc[i + nx] - dUc[i - nx]) +
+                    a2 * (dUc[i + 2*nx] - dUc[i - 2*nx]) +
+                    a3 * (dUc[i + 3*nx] - dUc[i - 3*nx]) +
+                    a4 * (dUc[i + 4*nx] - dUc[i - 4*nx])) * inv_dz;;
+
+        float eps  = epsilon[i];
+        float del  = delta[i];
+        float deps = depsilon[i];
+        float ddel = ddelta[i];
+
+        float x2 = u0_x * u0_x;
+        float z2 = u0_z * u0_z;
+        float x4 = x2 * x2;
+        float z4 = z2 * z2;
+        float x2z2 = x2 * z2;
+
+
+        float num = -2.0f * (eps - del) * x2z2;
+        float den = (1.0f + 2.0f * eps) * x4 + z4 + 2.0f * (1.0f + del) * x2z2 + 1e-37f;
+        float Sd = num/den;
+
+        float dnum_u = -4.0f * (eps - del) * (u0_x * z2 * du_x + x2 * u0_z * du_z);
+        float dden_u = 4.0f * (1.0f + 2.0f * eps) * x2 * u0_x * du_x + 4.0f * z2 * u0_z * du_z + 4.0f * (1.0f + del) * (u0_x * z2 * du_x + x2 * u0_z * du_z);
+        float dSd_u = (dnum_u - Sd * dden_u) / den;
+
+        float dnum_m = -2.0f * (deps - ddel) * x2z2;
+        float dden_m = 2.0f * deps * x4+ 2.0f * ddel * x2z2;
+        float dSd_m = (dnum_m - Sd * dden_m) / den;
+
+        float vp2 = vp[i] * vp[i];
+        float vp4 = vp2 * vp2;
+
+        float A0 = 1.0f + 2.0f * eps + Sd;
+        float B0 = 1.0f + Sd;
+        float H0 = A0 * u0_xx + B0 * u0_zz;
+        float propagation = vp2 * (A0 * du_xx + B0 * du_zz + dSd_u * (u0_xx + u0_zz));
+        
+        float born_source_m = -vp4 * dm[i] * H0;
+        float born_source_anisotropy = vp2 * (2.0f * deps * u0_xx + dSd_m * (u0_xx + u0_zz));
+        
+        U0f[i] = 2.0f * U0c[i] - U0f[i] + vp2 * dt2 * ((1.0f+ 2.0f*eps) + Sd) * u0_xx + vp2 * dt2 *(1.0f + Sd) * u0_zz;
+        dUf[i] = 2.0f * dUc[i] - dUf[i] + dt2 * (propagation + born_source_m + born_source_anisotropy);
+        
+
+        if (ix < N_abc){
+            U0f[i] *= A[ix];
+            U0c[i] *= A[ix];
+            dUf[i] *= A[ix];
+            dUc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            U0f[i] *= A[nx - 1 - ix];
+            U0c[i] *= A[nx - 1 - ix];
+            dUf[i] *= A[nx - 1 - ix];
+            dUc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            U0f[i] *= A[iz];
+            U0c[i] *= A[iz];
+            dUf[i] *= A[iz];
+            dUc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            U0f[i] *= A[nz - 1 - iz];
+            U0c[i] *= A[nz - 1 - iz];
+            dUf[i] *= A[nz - 1 - iz];
+            dUc[i] *= A[nz - 1 - iz];
+        }
+    
     }
 }
