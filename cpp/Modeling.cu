@@ -110,7 +110,7 @@ void Modeling::importBin(std::string path, float* array, int n){
 }
 
 void Modeling::createCerjanVector(){
-    const float sb = 4.0f * pmt->N_abc;
+    const float sb = 5.0f * pmt->N_abc;
     float* A_h = new float[pmt->N_abc]();
     for (int i = 0; i < pmt->N_abc; i++){
         float fb = (pmt->N_abc - i) / (1.4142f * sb);
@@ -344,14 +344,30 @@ void Modeling::setModel(){
 
     importBin(pmt->vpFile, vp_h, n_model);
     expandModel(vp_h, vp_exp_h);
-    const int ix = pmt->N_abc + pmt->nx / 2;
-    const int iz = pmt->N_abc + pmt->nz / 2;
-    const int i = iz * pmt->nx_abc + ix;
-
-    const float dm_ponto = 1e-9f; // mesmo valor usado no Born
-    const float v0 = vp_exp_h[i];
-    vp_exp_h[i] = 1.0f / sqrtf(1.0f / (v0 * v0) + dm_ponto);
     cudaMemcpy(vp, vp_exp_h, n_model_exp * sizeof(float), cudaMemcpyHostToDevice);
+
+    float* vp_dif_h = new float[n_model]();
+    float* dm_exp_h = new float[n_model_exp](); 
+
+    importBin("../inputs/models/diffractorvp_Nz301_Nx301.bin", vp_dif_h, n_model);
+
+    for (int iz = 0; iz < pmt->nz; ++iz) {
+        for (int ix = 0; ix < pmt->nx; ++ix) {
+            const int i = iz * pmt->nx + ix;
+            const int i_exp = (iz + pmt->N_abc) * pmt->nx_abc + (ix + pmt->N_abc);
+
+            const float v0 = vp_h[i];
+            const float v1 = vp_dif_h[i];
+
+            dm_exp_h[i_exp] = 1.0f / (v1 * v1) - 1.0f / (v0 * v0);
+        }
+    }
+
+    cudaMalloc((void**)&dm, n_model_exp * sizeof(float));
+    cudaMemcpy(dm, dm_exp_h, n_model_exp * sizeof(float), cudaMemcpyHostToDevice);
+
+    delete[] vp_dif_h;
+    delete[] dm_exp_h;
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
         epsilon_h = new float[n_model]();
@@ -429,31 +445,6 @@ void Modeling::saveSeismogram(const int shot){
 }
 
 void Modeling::forward_step(const int k){
-    if (dm == nullptr){
-        const int n = pmt->nx_abc * pmt->nz_abc;
-        const size_t bytes = n * sizeof(float);
-
-        cudaMalloc((void**)&dm, bytes);
-        cudaMalloc((void**)&depsilon, bytes);
-        cudaMalloc((void**)&ddelta, bytes);
-
-        cudaMemset(dm, 0, bytes);
-        cudaMemset(depsilon, 0, bytes);
-        cudaMemset(ddelta, 0, bytes);
-
-        // Mesmo ponto da malha física para as três perturbações.
-        const int ix = pmt->N_abc + pmt->nx / 2;
-        const int iz = pmt->N_abc + pmt->nz / 2;
-        const int i = iz * pmt->nx_abc + ix;
-
-        const float xm = 1e-9f;  // Δm, em (s/m)²
-        const float xe = 1e-3f;  // Δepsilon
-        const float xd = 1e-3f;  // Δdelta
-
-        cudaMemcpy(dm + i, &xm, sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(depsilon + i, &xe, sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(ddelta + i, &xd, sizeof(float), cudaMemcpyHostToDevice);
-    }
     if (pmt->approximation == "acoustic"){
         updateWaveEquationBorn<<<expBlocks, nThreads, 0, compute_stream>>>(future_born, current_born,future, current,vp,dm, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
         // updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
@@ -472,7 +463,7 @@ void Modeling::solveWaveEquation(){
     initializeFields();
     createWavelet();
     createCerjanVector();
-    setModel();
+    setModel(); 
     for (int shot = 0; shot < pmt->Nshot; shot++){
         std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
         sx = pmt->sx[shot];

@@ -42,12 +42,15 @@ public:
     float* grad_vp_h = nullptr;
     float* grad_vpnew_h = nullptr;
     float* p_vp = nullptr;
+    float* ilum_vp = nullptr;
     float* grad_eps_h = nullptr;
     float* grad_epsnew_h = nullptr;
     float* p_eps = nullptr;
+    float* ilum_eps = nullptr;
     float* grad_delta_h = nullptr;
     float* grad_deltanew_h = nullptr;
     float* p_delta = nullptr;
+    float* ilum_delta = nullptr;
     float* grad_theta_h = nullptr;
     float* grad_thetanew_h = nullptr;
     float* p_theta = nullptr;
