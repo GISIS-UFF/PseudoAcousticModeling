@@ -47,13 +47,13 @@ public:
     std::vector<float> grad_new;
     std::vector<float> p;
 
-    float* Q_vp = nullptr;
-    float* Q_eps = nullptr;
-    float* Q_delta = nullptr;
+    float* B_vp = nullptr;
+    float* B_eps = nullptr;
+    float* B_delta = nullptr;
     std::vector<float> Q;
 
     float* dvp = nullptr;
-    float* depsilon = nullptr;
+    float* deps = nullptr;
     float* ddelta = nullptr;
 
     float* current_born = nullptr;
@@ -64,6 +64,7 @@ public:
     std::vector<float> Hx;
 
     bool* water_mask = nullptr;
+    bool* TGN = nullptr;
 
     std::vector<std::vector<float>> s_vp_store;
     std::vector<std::vector<float>> y_vp_store;
