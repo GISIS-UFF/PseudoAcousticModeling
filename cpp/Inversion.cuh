@@ -38,33 +38,35 @@ public:
     float* deltanew_h = nullptr;
     float* theta_h = nullptr;
     float* thetanew_h = nullptr;
-
+    
     float* grad_vp_h = nullptr;
     float* grad_vpnew_h = nullptr;
     float* p_vp = nullptr;
-    float* ilum_vp = nullptr;
-    float* grad_eps_h = nullptr;
-    float* grad_epsnew_h = nullptr;
-    float* p_eps = nullptr;
-    float* ilum_eps = nullptr;
-    float* grad_delta_h = nullptr;
-    float* grad_deltanew_h = nullptr;
-    float* p_delta = nullptr;
-    float* ilum_delta = nullptr;
-    float* grad_theta_h = nullptr;
-    float* grad_thetanew_h = nullptr;
-    float* p_theta = nullptr;
+    
+    std::vector<float> grad;
+    std::vector<float> grad_new;
+    std::vector<float> p;
+
+    float* Q_vp = nullptr;
+    float* Q_eps = nullptr;
+    float* Q_delta = nullptr;
+    std::vector<float> Q;
+
+    float* dvp = nullptr;
+    float* depsilon = nullptr;
+    float* ddelta = nullptr;
+
+    float* current_born = nullptr;
+    float* future_born = nullptr;
+
+    std::vector<float> dm;
+    std::vector<float> x;
+    std::vector<float> Hx;
 
     bool* water_mask = nullptr;
 
     std::vector<std::vector<float>> s_vp_store;
     std::vector<std::vector<float>> y_vp_store;
-    std::vector<std::vector<float>> s_eps_store;
-    std::vector<std::vector<float>> y_eps_store;
-    std::vector<std::vector<float>> s_delta_store;
-    std::vector<std::vector<float>> y_delta_store;
-    std::vector<std::vector<float>> s_theta_store;
-    std::vector<std::vector<float>> y_theta_store;
 
     void InitializeInversionFields();
     void freeMemory();

@@ -82,7 +82,6 @@ void Migration::resetFields(){
 
 void Migration::Mute(float* seismogram, const int shot)
 {   
-    #pragma omp parallel for
     for (int irec = 0; irec < pmt->Nrec; irec++)
     {
         float dz = pmt->rec_z[irec] - pmt->shot_z[shot];
