@@ -257,7 +257,7 @@ void Migration::smoothModel(float* f, const bool* mask, const bool parameter){
     }
 }
 
-void Migration::backward_step(const int k, float* P){
+void Migration::backward_step(float* P){
     if (pmt->approximation == "acoustic"){
         updateAdjointWaveEquation<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, mdl->vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, mdl->A, pmt->N_abc);
     }
@@ -393,17 +393,17 @@ void Migration::solveReverseTimeMigrationOntheFly(){
         mdl->resetFields();
         loadSeismogram(shot);
         for (int k = 0; k < pmt->nt; k++){
-            mdl->forward_step(k);
+            mdl->forward_step();
             injectSource <<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz,pmt->dt);
             cudaMemcpyAsync(savefield + k * n_model_exp,mdl->current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->compute_stream);
             std::swap(mdl->current, mdl->future);
         }
         cudaStreamSynchronize(mdl->compute_stream);
         for (int t = pmt->nt - 1; t >= 0; t--){
-            backward_step(t,savefield + t * n_model_exp);
+            backward_step(savefield + t * n_model_exp);
             if (t >= pmt->itlag){
                 int it = t - pmt->itlag;
-                injectAdjointSource<<<seisBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt);
+                injectAdjointSource<<<seisBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt, mdl->vp);
             }
             std::swap(currentbck, futurebck);
         }
@@ -438,7 +438,7 @@ void Migration::solveReverseTimeMigrationCheckpoint(){
         loadSeismogram(shot);
 
         for(int k = 0; k < pmt->nt; k++){
-            mdl->forward_step(k);
+            mdl->forward_step();
             injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz,pmt->dt);
             if((k <last_t) && ((last_t-k)%pmt->step==0)){
                 if(k >= pmt->step){
@@ -473,11 +473,11 @@ void Migration::solveReverseTimeMigrationCheckpoint(){
 
             for(int t = window_start; t >= window_end; t--){
                 removeSource<<<1,1,0,mdl->compute_stream>>>(mdl->future, mdl->source, t, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz, pmt->dx, pmt->dz, pmt->dt);
-                mdl->forward_step(t);
-                backward_step(t, mdl->current);
+                mdl->forward_step();
+                backward_step(mdl->current);
                 if(t >= pmt->itlag){
                     const int it=t-pmt->itlag;
-                    injectAdjointSource<<<seisBlocks,nThreads,0,mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt);
+                    injectAdjointSource<<<seisBlocks,nThreads,0,mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt, mdl->vp);
                 }
                 
                 
@@ -519,15 +519,15 @@ __global__ void removeSource(float* __restrict__ future, const float* __restrict
     }
 }
 
-__global__ void injectAdjointSource(float* __restrict__ futurebck, const float* __restrict__ seismogram, const int* rx, const int* rz, int t, int Nrec, int nx_abc, float dx, float dz, float dt){
+__global__ void injectAdjointSource(float* __restrict__ futurebck, const float* __restrict__ seismogram, const int* rx, const int* rz, int t, int Nrec, int nx_abc, float dx, float dz, float dt, const float* __restrict__ vp){
     int irec = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (irec >= Nrec){
         return;
     }
-
+    const float vp2 = vp[rz[irec] * nx_abc + rx[irec]]*vp[rz[irec] * nx_abc + rx[irec]];
     float inv_dxdz = 1.0f / (dx * dz);  
-    futurebck[rz[irec] * nx_abc + rx[irec]] += seismogram[t * Nrec + irec] * inv_dxdz*dt*dt ;
+    futurebck[rz[irec] * nx_abc + rx[irec]] += seismogram[t * Nrec + irec] * vp2 * inv_dxdz*dt*dt;
 }
 
 __global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc, float* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc){

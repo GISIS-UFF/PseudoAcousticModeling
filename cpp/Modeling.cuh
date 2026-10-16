@@ -52,7 +52,7 @@ public:
     void setModel();
     void saveSnapshot(const int shot,const int k);
     void saveSeismogram(const int shot);
-    void forward_step(const int k);
+    void forward_step();
     void solveWaveEquation(); 
 };
 

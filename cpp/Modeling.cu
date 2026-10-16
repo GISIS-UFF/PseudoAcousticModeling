@@ -412,7 +412,7 @@ void Modeling::saveSeismogram(const int shot){
     std::cout<<"Info: File saved to " + seismogramFile<<std::endl;
 }
 
-void Modeling::forward_step(const int k){
+void Modeling::forward_step(){
     if (pmt->approximation == "acoustic"){
         updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
     }
@@ -436,7 +436,7 @@ void Modeling::solveWaveEquation(){
         sz = pmt->sz[shot];
         resetFields();
         for (int k = 0; k < pmt->nt; k++){
-            forward_step(k);
+            forward_step();
             injectSource <<<1, 1, 0, compute_stream>>>(future, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz, pmt->dt);
             if(k>=pmt->itlag){
                 storeSeismogram<<<seisBlocks, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);

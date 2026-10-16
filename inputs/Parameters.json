@@ -49,5 +49,4 @@
     "modelFolder": "../inputs/models/",
     "estimatedmodelsFolder":"../outputs/estimated_models/",
     "gradientsFolder": "../outputs/gradients/"
-
 }
