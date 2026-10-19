@@ -872,15 +872,18 @@ void Inversion::applyMultiparameterStep(const bool update_eps, const bool update
 
     #pragma omp parallel for
     for (int i = 0; i < n_model; i++){
-        vp_new[i] = static_cast<float>(std::clamp(static_cast<float>(vp[i]) + alpha * vp_max *dm[i],static_cast<float>(vp_min), static_cast<float>(vp_max)));
+        vp_new[i] = vp[i] + alpha * vp_max *dm[i];
+        // vp_new[i] = static_cast<float>(std::clamp(static_cast<float>(vp[i]) + alpha * vp_max *dm[i],static_cast<float>(vp_min), static_cast<float>(vp_max)));
         if (update_eps){
-            epsilon_new[i] = static_cast<float>(std::clamp(static_cast<float>(epsilon[i]) + alpha * dm[i + n_model], static_cast<float>(pmt->epsmin), static_cast<float>(pmt->epsmax)));
+            epsilon_new[i] = epsilon[i] + alpha * pmt->epsmax * dm[i + n_model];
+            // epsilon_new[i] = static_cast<float>(std::clamp(static_cast<float>(epsilon[i]) + alpha * pmt->epsmax * dm[i + n_model], static_cast<float>(pmt->epsmin), static_cast<float>(pmt->epsmax)));
             }
         else{
             epsilon_new[i] = epsilon[i];
         }
         if (update_delta){
-            delta_new[i] = static_cast<float>(std::clamp(static_cast<float>(delta[i]) + alpha * dm[i + 2*n_model], static_cast<float>(pmt->deltamin), static_cast<float>(pmt->deltamax)));
+            delta_new[i] = delta[i] + alpha * pmt->deltamax * dm[i + 2*n_model];
+            // delta_new[i] = static_cast<float>(std::clamp(static_cast<float>(delta[i]) + alpha * pmt->deltamax * dm[i + 2*n_model], static_cast<float>(pmt->deltamin), static_cast<float>(pmt->deltamax)));
         }
         else{
             delta_new[i] = delta[i];
@@ -1190,39 +1193,35 @@ void Inversion::computeHessianVectorProduct(){
 
 void Inversion::setTGN(const bool update_eps, const bool update_delta){
     const int n_model = pmt->nx * pmt->nz;
-    const int n = 3*n_model;
-    const float vp_max = 1.0f / (pmt->vmin * pmt->vmin);
+    const int n = 3 * n_model;
+    const float vp_max = 1.0 / (pmt->vmin * pmt->vmin);
+    const float lambda = 1e-20f;
+    const bool active[3] = {true, update_eps, update_delta};
 
     Q.resize(n);
-    p.resize(n);
-    x.resize(n);
-    Hx.assign(n, 0.0);
-    dm.assign(n, 0.0);
+    p.assign(n, 0.0f);
+    x.assign(n, 0.0f);
+    Hx.assign(n, 0.0f);
+    dm.assign(n, 0.0f);
 
-    cudaMemcpy(Q.data(), B_vp, n_model*sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(Q.data() + n_model, B_eps, n_model*sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(Q.data() + 2*n_model, B_delta, n_model*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(Q.data(), B_vp, n_model * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(Q.data() + n_model, B_eps, n_model * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(Q.data() + 2 * n_model, B_delta, n_model * sizeof(float), cudaMemcpyDeviceToHost);
 
-    
-    float B_ref = 0.0f;
-    for(int i = 0; i < n_model; ++i){
-        Q[i] *= vp_max * vp_max;
-        B_ref = std::max(B_ref, Q[i]);
-    }
+    const float fator_norm[3] = {vp_max, pmt->epsmax, pmt->deltamax};
+    const float s[3] = {1.0, 1.0, 1.0};
 
-    const float lambda = 1e-3;
-    const bool active[3] = {true, update_eps, update_delta};
-    for(int i=0;i<n;++i){
-        const int j = i/n_model;
+    for(int i = 0; i < n; ++i){
+        const int j = i / n_model;
         if(!active[j]){
-            Q[i] = 0.0;
-            p[i] = 0.0;
-            x[i] = 0.0;
+            Q[i] = 0.0f;
             continue;
         }
 
-        Q[i] = 1.0f / (Q[i] / B_ref + lambda);
-        p[i] = Q[i]*grad[i];
+        const float denominator = s[j] * s[j] * fator_norm[j] * fator_norm[j] * Q[i] + lambda;
+
+        Q[i] = 1.0 / denominator;
+        p[i] = Q[i] * grad[i];
         x[i] = -p[i];
     }
 }
@@ -1237,8 +1236,8 @@ void Inversion::setBornPerturbation(const std::vector<float>& x){
 
     for(int i = 0; i < n_model; ++i){
         model[i] = vp_max * x[i];
-        model[n_model + i] = x[n_model + i];
-        model[2*n_model + i] = x[2*n_model + i];
+        model[n_model + i] = pmt->epsmax * x[n_model + i];
+        model[2*n_model + i] = pmt->deltamax * x[2*n_model + i];
     }
 
     mdl->expandModel(model.data(), temp.data());
@@ -1286,7 +1285,7 @@ void Inversion::solveGaussNewton(std::vector<float>& g, const float nk, const fl
     int inner = 0;
     const float vp_max = 1.0f / (pmt->vmin * pmt->vmin);
 
-    while(norm_vector(g) > nk * grad_norm && inner < 10){
+    while(norm_vector(g) > nk * grad_norm && inner < 5){
         setBornPerturbation(x);
         computeHessianVectorProduct();
 
@@ -1300,6 +1299,12 @@ void Inversion::solveGaussNewton(std::vector<float>& g, const float nk, const fl
                 Hx[i] = -Hx[i];
                 if(j == 0){
                     Hx[i] *= vp_max;
+                }
+                else if(j == 1){
+                    Hx[i] *= pmt->epsmax;
+                }
+                else{
+                    Hx[i] *= pmt->deltamax;
                 }
             }
             else{
@@ -1317,7 +1322,6 @@ void Inversion::solveGaussNewton(std::vector<float>& g, const float nk, const fl
         std::cout << "beta2 = gTQg = " << beta2 << std::endl;
 
         if(beta1 <= 0.0 || beta2 <= 0.0){
-            std::cout << "warning: invalid GN curvature/CG coefficients; Born/adjoint not validated" << std::endl;
             dm.assign(n, 0.0); 
             break;
         }
@@ -1331,7 +1335,6 @@ void Inversion::solveGaussNewton(std::vector<float>& g, const float nk, const fl
 
         beta2_new = dot_vector(g,p);
         if(beta2_new < 0.0){
-            std::cout << "warning: invalid CG residual" << std::endl;
             dm.assign(n, 0.0);
             break;
         }
@@ -1360,6 +1363,10 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
 
     const int eps_first_itr = 1 + static_cast<int>(std::ceil(eps_start*(pmt->niter - 1)));
     const int delta_first_itr = 1 + static_cast<int>(std::ceil(delta_start*(pmt->niter - 1)));
+
+    if(pmt->vmin <= 0.0 || pmt->epsmax <= 0.0 || pmt->deltamax <= 0.0){
+        throw std::runtime_error("FWI: referencias de normalizacao invalidas");
+    }
 
     setModel();
 
@@ -1412,6 +1419,8 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             X_current = calculateMultiparameterGradient(true, true, grad, true);
             for(int i = 0; i < n_model; ++i){
                 grad[i] *= vp_max;
+                grad[n_model+i] *= pmt->epsmax;
+                grad[2*n_model+i] *= pmt->deltamax;
             }
             if(!update_eps) std::fill(grad.begin()+n_model, grad.begin()+2*n_model, 0.0);
             if(!update_delta) std::fill(grad.begin()+2*n_model, grad.end(), 0.0);
@@ -1430,6 +1439,8 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
 
             for(int i = 0; i < n_model; ++i){
                 B_vp_h[i] *= vp_max * vp_max;
+                B_eps_h[i] *= pmt->epsmax * pmt->epsmax;
+                B_delta_h[i] *= pmt->deltamax * pmt->deltamax;
             }
 
             const std::string B_vp_file = pmt->gradientsFolder+"vp_pseudohessian_fwi_iter_"+std::to_string(itr+1)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
@@ -1474,11 +1485,13 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical(){
             applyMultiparameterStep(update_eps, update_delta, vp_h, eps_h, delta_h, vpnew_h, epsnew_h, deltanew_h, dm, alpha);
 
             const std::string dm_vp_file = pmt->gradientsFolder+"vp_dm_fwi_iter_"+std::to_string(itr+1)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
-            const std::string dm_eps_file =pmt->gradientsFolder+"epsilon_dm_fwi_iter_"+std::to_string(itr+1)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
+            const std::string dm_eps_file = pmt->gradientsFolder+"epsilon_dm_fwi_iter_"+std::to_string(itr+1)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
             const std::string dm_delta_file= pmt->gradientsFolder+"delta_dm_fwi_iter_"+std::to_string(itr+1)+"_"+pmt->approximation+"_Nx"+std::to_string(pmt->nx)+"_Nz"+std::to_string(pmt->nz)+"_freq"+fcut_stream.str()+".bin";
             
             for(int i = 0; i < n_model; ++i){
                 dm[i] *= vp_max;
+                dm[n_model+i] *= pmt->epsmax;
+                dm[2*n_model+i] *= pmt->deltamax;
             }
 
             saveModel(dm_vp_file, dm.data());
