@@ -250,7 +250,7 @@ float Inversion::calculateGradientOntheFly(bool TGN = false){
 
             if (t >= pmt->itlag){
                 int it = t - pmt->itlag;
-                injectAdjointSource<<<mdl->seisBlocks, nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz,pmt->dt, mdl->vp);
+                injectAdjointSource<<<mdl->seisBlocks, nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz,pmt->dt);
             }
 
             std::swap(mgt->currentbck, mgt->futurebck);
@@ -339,7 +339,7 @@ float Inversion::calculateGradientCheckpoint(bool TGN = false){
                 backward_step(mdl->current, mdl->future, past_field, TGN);
                 if(t>=pmt->itlag){
                     const int it=t-pmt->itlag;
-                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt, mdl->vp);
+                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt);
                 }
                 
                 std::swap(mdl->current,mdl->future);
@@ -1170,7 +1170,7 @@ void Inversion::computeHessianVectorProduct(){
                 backward_step(mdl->current, mdl->future, past_field, false);
                 if(t>=pmt->itlag){
                     const int it=t-pmt->itlag;
-                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt, mdl->vp);
+                    injectAdjointSource<<<mdl->seisBlocks,nThreads,0,mdl->compute_stream>>>(mgt->futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dx, pmt->dz, pmt->dt);
                 }
                 
                 std::swap(mdl->current,mdl->future);
@@ -1741,7 +1741,7 @@ const int nx, const int nz, const int N_abc, const bool multiparameter, float* _
         vp_grad[idx] += adj * ptt;
 
         if (multiparameter){
-            const float dP_deps = (-2.0f - dSd_deps) * pxx - dSd_deps * pzz;
+            const float dP_deps = -2.0f * pxx - dSd_deps * Q;
             const float dP_ddelta = -dSd_ddelta * Q;
 
             eps_grad[idx] += adj * dP_deps;
@@ -2170,9 +2170,10 @@ __global__ void updateWaveEquationVTIBornTGN(float* __restrict__ dUf, float* __r
 
         float eps  = epsilon[i];
         float del  = delta[i];
+        float dvp_i = dvp[i];
         float deps_i = deps[i];
         float ddel_i = ddelta[i];
-
+        
         float x2 = u0_x * u0_x;
         float z2 = u0_z * u0_z;
         float x4 = x2 * x2;
@@ -2181,30 +2182,36 @@ __global__ void updateWaveEquationVTIBornTGN(float* __restrict__ dUf, float* __r
 
         float num = -2.0f * (eps - del) * x2z2;
         float den = (1.0f + 2.0f * eps) * x4 + z4 + 2.0f * (1.0f + del) * x2z2 + 1e-37f;
-        float Sd = num/den;
+        const float inv_den = 1.0f / den;
+        float Sd = num * inv_den;
 
-        float dnum_u = -4.0f * (eps - del) * (u0_x * z2 * du_x + x2 * u0_z * du_z);
-        float dden_u = 4.0f * (1.0f + 2.0f * eps) * x2 * u0_x * du_x + 4.0f * z2 * u0_z * du_z + 4.0f * (1.0f + del) * (u0_x * z2 * du_x + x2 * u0_z * du_z);
-        float dSd_u = (dnum_u - Sd * dden_u) / den;
+        float num_x = -4.0f * (eps - del) * u0_x * z2;
+        float num_z = -4.0f * (eps - del) * x2 * u0_z;
+        float den_x = 4.0f * (1.0f + 2.0f * eps) * x2 * u0_x + 4.0f * (1.0f + del) * u0_x * z2;
+        float den_z = 4.0f * z2 * u0_z + 4.0f * (1.0f + del) * x2 * u0_z;
 
-        float dnum_m = -2.0f * (deps_i - ddel_i) * x2z2;
-        float dden_m = 2.0f * deps_i * x4+ 2.0f * ddel_i * x2z2;
-        float dSd_m = (dnum_m - Sd * dden_m) / den;
+        float Cx = (num_x - Sd * den_x) * inv_den;
+        float Cz = (num_z - Sd * den_z) * inv_den;
+        float dSd_u = Cx * du_x + Cz * du_z;
+
+        float Sd_eps = (-2.0f * x2z2 - Sd * 2.0f * x4) * inv_den;
+        float Sd_del = ( 2.0f * x2z2 - Sd * 2.0f * x2z2) * inv_den;
+        float dSd_m = Sd_eps * deps_i + Sd_del * ddel_i;
 
         float vp2 = vp[i] * vp[i];
-
         float A0 = 1.0f + 2.0f * eps + Sd;
         float B0 = 1.0f + Sd;
-        float propagation = vp2 * (A0 * du_xx + B0 * du_zz + dSd_u * (u0_xx + u0_zz));
-        
-        const float spatial0 = A0*u0_xx + B0*u0_zz;
-        const float u0_tt = vp2 * spatial0;
-        U0f[i] = 2.0f * U0c[i] - U0f[i] + dt2*u0_tt;
+        float spatial = A0 * u0_xx + B0 * u0_zz;
 
-        const float born_source_m = -vp2*dvp[i]*u0_tt;
-        const float born_source_anisotropy = vp2*(2.0f*deps_i*u0_xx + dSd_m*(u0_xx+u0_zz));
-        dUf[i] = 2.0f * dUc[i] - dUf[i] + dt2 * (propagation + born_source_m + born_source_anisotropy);
-        
+        U0f[i] = 2.0f * U0c[i] - U0f[i] + dt2 * vp2 * spatial;
+
+        float propagation = A0 * du_xx + B0 * du_zz + dSd_u * (u0_xx + u0_zz);
+        float u0_tt = vp2 * spatial;
+        float born_source_q = - dvp_i * u0_tt;
+        float born_source_anisotropy = 2.0f * deps_i * u0_xx + dSd_m * (u0_xx + u0_zz);
+
+        dUf[i] = 2.0f * dUc[i] - dUf[i] + dt2 * vp2 * propagation + born_source_q + born_source_anisotropy;
+
         if (ix < N_abc){
             U0f[i] *= A[ix];
             U0c[i] *= A[ix];
