@@ -1,13 +1,19 @@
 
 import csv
 from pathlib import Path
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-pasta = Path("/home/juanmarques/workspace/PseudoAcousticModeling/outputs/validacao")
+
+pasta = Path("../outputs/validacao")
 pasta_figuras = pasta / "figuras"
+
+NX = 31
+NZ = 31
+NT_DATA = 1601
 
 DX = 10.0
 DZ = 10.0
@@ -16,34 +22,61 @@ DT = 0.0005
 parametros = ["q", "epsilon", "delta"]
 
 
-def lerBin(arquivo):
+def lerBin(arquivo, nome):
+    tamanho = arquivo.stat().st_size
+
+    if tamanho == 0:
+        raise ValueError(f"Arquivo vazio: {arquivo}")
+
+    # Primeiro tenta ler com cabecalho.
     with open(arquivo, "rb") as f:
         dimensoes = np.fromfile(f, dtype=np.int32, count=2)
 
-        if len(dimensoes) != 2:
-            raise ValueError(f"Cabecalho incompleto: {arquivo}")
+        if len(dimensoes) == 2:
+            nz = int(dimensoes[0])
+            nx = int(dimensoes[1])
 
-        nz, nx = int(dimensoes[0]), int(dimensoes[1])
+            if nz > 0 and nx > 0:
+                tamanho_esperado = 8 + nz * nx * 4
 
-        if nz <= 0 or nx <= 0:
-            raise ValueError(f"Dimensoes invalidas: {arquivo}")
+                if tamanho == tamanho_esperado:
+                    dados = np.fromfile(f, dtype=np.float32)
 
-        dados = np.fromfile(f, dtype=np.float32)
+                    if not np.isfinite(dados).all():
+                        raise ValueError(f"NaN ou Inf: {arquivo}")
 
-    if dados.size != nz * nx:
-        raise ValueError(
-            f"Tamanho incorreto em {arquivo}: "
-            f"esperado {nz * nx}, encontrado {dados.size}"
-        )
+                    return dados.reshape(nz, nx)
+
+    # Se nao houver cabecalho, le somente os floats.
+    dados = np.fromfile(arquivo, dtype=np.float32)
+
+    if nome.startswith("born_"):
+        nz = NT_DATA
+
+        if dados.size % nz != 0:
+            raise ValueError(f"Tamanho invalido: {arquivo}")
+
+        nx = dados.size // nz
+
+    else:
+        nz = NZ
+        nx = NX
+
+        if dados.size != nz * nx:
+            raise ValueError(
+                f"Tamanho incorreto em {arquivo}: "
+                f"esperado {nz * nx}, encontrado {dados.size}"
+            )
 
     if not np.isfinite(dados).all():
-        raise ValueError(f"NaN ou Inf no arquivo: {arquivo}")
+        raise ValueError(f"NaN ou Inf: {arquivo}")
 
     return dados.reshape(nz, nx)
 
 
 def lerMetricas():
     arquivo = pasta / "metrics.csv"
+
     if not arquivo.exists():
         raise FileNotFoundError(f"Arquivo nao encontrado: {arquivo}")
 
@@ -57,18 +90,19 @@ def lerMetricas():
             teste = linha["test"]
             entrada = int(linha["input"])
             saida = int(linha["output"])
-            h = float(linha["h"])
 
             if teste == "gradient":
                 nome = "gradiente_" + parametros[entrada]
+
             elif teste == "born":
                 nome = "born_" + parametros[entrada]
+
             elif teste == "hessian":
                 nome = (
                     "hessiana_" + parametros[entrada] +
-                    "_para_" + parametros[saida] +
-                    "_h" + f"{h:.5f}"
+                    "_para_" + parametros[saida]
                 )
+
             else:
                 outras_metricas.append(linha)
                 continue
@@ -86,6 +120,7 @@ def fazerFigura(nome, operador, fd, metrica):
         np.max(np.abs(fd)),
         np.max(np.abs(diferenca))
     )
+
     if limite == 0:
         limite = 1.0
 
@@ -97,44 +132,74 @@ def fazerFigura(nome, operador, fd, metrica):
         xlabel = "Receptor"
         ylabel = "Tempo (s)"
         aspecto = "auto"
+
     else:
         extent = (0, (nx - 1) * DX, (nz - 1) * DZ, 0)
         xlabel = "x (m)"
         ylabel = "z (m)"
         aspecto = "equal"
 
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
-    titulos = ["Operador implementado", "Diferencas finitas", "Implementado - FD"]
+    fig, axes = plt.subplots(
+        1, 3,
+        figsize=(13, 4),
+        constrained_layout=True
+    )
 
-    for ax, dados, titulo in zip(axes, [operador, fd, diferenca], titulos):
+    titulos = [
+        "Operador implementado",
+        "Diferencas finitas",
+        "Implementado - FD"
+    ]
+
+    imagens = [operador, fd, diferenca]
+
+    for ax, dados, titulo in zip(axes, imagens, titulos):
         im = ax.imshow(
-            dados, cmap="RdBu_r", vmin=-limite, vmax=limite,
-            extent=extent, aspect=aspecto, interpolation="nearest"
+            dados,
+            cmap="RdBu_r",
+            vmin=-limite,
+            vmax=limite,
+            extent=extent,
+            aspect=aspecto,
+            interpolation="nearest"
         )
+
         ax.set_title(titulo)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
 
-    fig.colorbar(im, ax=axes, shrink=0.8, format="%.2e")
+    fig.colorbar(
+        im,
+        ax=axes,
+        shrink=0.8,
+        format="%.2e"
+    )
 
     if metrica is not None:
         erro = float(metrica["relative_error"])
-        fig.suptitle(f"{nome}  |  Erro relativo = {erro:.3e}")
+        fig.suptitle(
+            f"{nome}  |  Erro relativo = {erro:.3e}"
+        )
     else:
         fig.suptitle(nome)
 
     destino = pasta_figuras / (nome + ".png")
+
     fig.savefig(destino, dpi=180)
     plt.close(fig)
+
     return destino
 
 
 def main():
     metricas, outras_metricas = lerMetricas()
+
     arquivos = sorted(pasta.glob("*_operator.bin"))
 
     if not arquivos:
-        raise FileNotFoundError(f"Nenhum *_operator.bin encontrado em {pasta}")
+        raise FileNotFoundError(
+            f"Nenhum *_operator.bin encontrado em {pasta}"
+        )
 
     pasta_figuras.mkdir(parents=True, exist_ok=True)
 
@@ -144,39 +209,62 @@ def main():
 
     for arquivo in arquivos:
         nome = arquivo.name.removesuffix("_operator.bin")
+
         arquivo_fd = pasta / (nome + "_fd.bin")
 
         if not arquivo_fd.exists():
-            raise FileNotFoundError(f"Falta o par: {arquivo_fd}")
+            raise FileNotFoundError(
+                f"Falta o par: {arquivo_fd}"
+            )
 
-        operador = lerBin(arquivo)
-        fd = lerBin(arquivo_fd)
+        operador = lerBin(arquivo, nome)
+        fd = lerBin(arquivo_fd, nome)
 
         if operador.shape != fd.shape:
-            raise ValueError(f"Dimensoes diferentes: {nome}")
+            raise ValueError(
+                f"Dimensoes diferentes: {nome}"
+            )
 
         metrica = metricas.get(nome)
+
         if metrica is not None:
-            print(f"{nome:55s} {float(metrica['relative_error']):15.5e}")
+            erro = float(metrica["relative_error"])
         else:
-            print(f"{nome:55s} {'sem metrica':>15s}")
+            diferenca = operador.astype(np.float64) - fd.astype(np.float64)
+
+            norma_operador = np.linalg.norm(operador.astype(np.float64))
+            norma_fd = np.linalg.norm(fd.astype(np.float64))
+
+            denominador = max(norma_operador, norma_fd)
+
+            if denominador > 0:
+                erro = np.linalg.norm(diferenca) / denominador
+            else:
+                erro = 0.0
+
+        print(f"{nome:55s} {erro:15.5e}")
 
         fazerFigura(nome, operador, fd, metrica)
 
     if outras_metricas:
-        print("\nMetricas adicionais (repetibilidade, curvatura, simetria):")
+        print("\nMetricas adicionais:")
+        print("-" * 72)
+
         for linha in outras_metricas:
             print(
-                f"{linha['test']:15s} entrada={linha['input']:>2s} "
+                f"{linha['test']:15s} "
+                f"entrada={linha['input']:>2s} "
                 f"saida={linha['output']:>2s} "
                 f"erro={float(linha['relative_error']):.5e} "
                 f"norma_1={float(linha['operator_norm']):.5e} "
                 f"norma_2={float(linha['fd_norm']):.5e}"
             )
 
-    print(f"\n{len(arquivos)} figuras geradas em: {pasta_figuras.resolve()}")
+    print(
+        f"\n{len(arquivos)} figuras geradas em: "
+        f"{pasta_figuras.resolve()}"
+    )
 
 
 if __name__ == "__main__":
     main()
-
