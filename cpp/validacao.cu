@@ -1,3 +1,4 @@
+
 #include "Survey.hpp"
 #include "Modeling.cuh"
 #include "Migration.cuh"
@@ -25,12 +26,30 @@ const float FCUT = 20.0f;
 const float VP0 = 2000.0f;
 const float EPS0 = 0.10f;
 const float DEL0 = 0.05f;
-const double H = 0.01;
 
-const std::string folder = "../outputs/validacao/";
+const double H = 1.0;
+const double perturbation[3] = {2.0e-9, 0.01, 0.01};
+const double anomaly[3] = {2.0e-9, 0.003, 0.002};
+
+const std::string folder = "../outputs/validacao_normalizada/";
 const std::string parameters[3] = {"q", "epsilon", "delta"};
-const double scale[3] = {1.0 / (1500.0 * 1500.0), 0.3, 0.2};
 
+double parameterScale(const Survey& pmt, const int parameter){
+    if(parameter == 0) return 1.0 / (double(pmt.vmin)*pmt.vmin);
+    if(parameter == 1) return double(pmt.epsmax);
+    return double(pmt.deltamax);
+}
+
+void normalizeGradient(const Survey& pmt, std::vector<float>& gradient){
+    const int n_model = NX*NZ;
+    for(int j = 0; j < 3; j++){
+        const double scale = parameterScale(pmt, j);
+        for(int i = 0; i < n_model; i++){
+            const int k = j*n_model + i;
+            gradient[k] = float(double(gradient[k])*scale);
+        }
+    }
+}
 
 void saveBin(const std::string& filename, const std::vector<float>& data, const int nz, const int nx){
     if(data.size() != size_t(nz)*nx){
@@ -202,7 +221,6 @@ std::vector<float> forwardModeling(Survey& pmt, Modeling& mdl, Inversion& inv, c
         std::swap(mdl.current, mdl.future);
     }
 
-    
     const int n_seis = pmt.nt_data*pmt.Nrec;
     std::vector<float> seismogram_h(n_seis);
     cudaMemcpy(seismogram_h.data(), mdl.seismogram, n_seis*sizeof(float), cudaMemcpyDeviceToHost);
@@ -222,7 +240,6 @@ double objectiveFunction(const std::vector<float>& calculated, const std::vector
     }
     return X;
 }
-
 
 std::string saveObservedData(const Survey& pmt, const std::vector<float>& observed){
     std::ostringstream fcut;
@@ -245,14 +262,22 @@ std::vector<float> calculateGradient(Inversion& inv, const std::vector<float>& m
     setModel(inv, model);
     std::vector<float> gradient;
     inv.calculateMultiparameterGradient(true, true, gradient, false);
+    normalizeGradient(*inv.pmt, gradient);
     return gradient;
+}
+
+void setNormalizedBornPerturbation(Inversion& inv, const std::vector<float>& direction){
+    if(direction.size() != size_t(3*NX*NZ)){
+        throw std::runtime_error("Invalid dimensionless Born direction size.");
+    }
+    inv.setBornPerturbation(direction);
 }
 
 std::vector<float> bornModeling(Survey& pmt, Modeling& mdl, Migration& mgt, Inversion& inv, const std::vector<float>& model, const std::vector<float>& direction, const bool saveFields){
     const int n_model_exp = pmt.nx_abc*pmt.nz_abc;
     const int n_seis = pmt.nt_data*pmt.Nrec;
     setModel(inv, model);
-    inv.setBornPerturbation(direction);
+    setNormalizedBornPerturbation(inv, direction);
     mdl.resetFields();
     cudaMemset(inv.current_born, 0, n_model_exp*sizeof(float));
     cudaMemset(inv.future_born, 0, n_model_exp*sizeof(float));
@@ -287,12 +312,10 @@ std::vector<float> hessianVectorProduct(Survey& pmt, Modeling& mdl, Migration& m
     const int n_model_exp = pmt.nx_abc*pmt.nz_abc;
     const int n_model = NX*NZ;
     for(int t = pmt.nt-1; t >= 0; t--){
-        float* current = mgt.savefield + size_t(t)*n_model_exp;
-        float* past = mgt.savefield + size_t(std::max(t-1,0))*n_model_exp;
-        float* future = mgt.savefield + size_t(std::min(t+1,pmt.nt-1))*n_model_exp;
-        inv.backward_step(current, past, future, false);
+        const float* P = mgt.savefield + size_t(t)*n_model_exp;
+        inv.backward_step(P, false);
         if(t >= pmt.itlag){
-            injectAdjointSource<<<mdl.seisBlocks, nThreads, 0, mdl.compute_stream>>>(mgt.futurebck, mdl.seismogram, mdl.rx, mdl.rz, t-pmt.itlag, pmt.Nrec, pmt.nx_abc, pmt.dx, pmt.dz, pmt.dt, mdl.vp);
+            injectAdjointSource<<<mdl.seisBlocks, nThreads, 0, mdl.compute_stream>>>(mgt.futurebck, mdl.seismogram, mdl.rx, mdl.rz, t-pmt.itlag, pmt.Nrec, pmt.nx_abc, pmt.dt, mdl.vp);
         }
         std::swap(mgt.currentbck, mgt.futurebck);
     }
@@ -301,10 +324,12 @@ std::vector<float> hessianVectorProduct(Survey& pmt, Modeling& mdl, Migration& m
     cudaMemcpy(result.data(), mgt.image, n_model*sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(result.data()+n_model, inv.eps_grad, n_model*sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(result.data()+2*n_model, inv.delta_grad, n_model*sizeof(float), cudaMemcpyDeviceToHost);
-    
+
     for(int j = 0; j < 3; j++){
+        const double scale = parameterScale(pmt,j);
         for(int i = 0; i < n_model; i++){
-            result[j*n_model+i] *= -scale[j];
+            const int k = j*n_model + i;
+            result[k] = float(-double(result[k])*scale);
         }
     }
     return result;
@@ -314,6 +339,13 @@ void validateGradient(std::ofstream& csv){
     std::cout << "\ninfo: Gradient validation." << std::endl;
     Survey pmt;
     setupSurvey(pmt, false);
+    std::cout << "info: TGN m=S*y, com S=(1/vmin^2, epsmax, deltamax)" << std::endl;
+    for(int j = 0; j < 3; j++){
+        std::cout << "info: " << parameters[j]
+                  << " S=" << parameterScale(pmt,j)
+                  << " x=" << perturbation[j]/parameterScale(pmt,j)
+                  << " (S*x=" << perturbation[j] << ")" << std::endl;
+    }
     Modeling mdl(&pmt);
     Migration mgt(&pmt, &mdl);
     Inversion inv(&pmt, &mdl, &mgt);
@@ -332,7 +364,7 @@ void validateGradient(std::ofstream& csv){
             float value = float(std::exp(-r2/15.0));
             int i = z*NX+x;
             for(int j = 0; j < 3; j++){
-                trueModel[j*n_model+i] += float(0.01*scale[j]*value);
+                trueModel[j*n_model+i] += float(anomaly[j]*value);
             }
         }
     }
@@ -347,12 +379,15 @@ void validateGradient(std::ofstream& csv){
         std::vector<float> minus = model;
         for(int i = 0; i < n_model; i++){
             int k = j*n_model+i;
-            plus[k] = float(double(model[k]) + H*scale[j]);
-            minus[k] = float(double(model[k]) - H*scale[j]);
+            plus[k] = float(double(model[k]) + H*perturbation[j]);
+            minus[k] = float(double(model[k]) - H*perturbation[j]);
             double realStep = double(plus[k])-minus[k];
+            if(realStep == 0.0){
+                throw std::runtime_error("Gradient step too small for float32.");
+            }
             double fp = objectiveFunction(forwardModeling(pmt,mdl,inv,plus), observed);
             double fm = objectiveFunction(forwardModeling(pmt,mdl,inv,minus), observed);
-            fd[i] = float((fp-fm)/realStep);
+            fd[i] = float(((fp-fm)/realStep)*parameterScale(pmt,j));
             plus[k] = model[k];
             minus[k] = model[k];
             if(i%100 == 0){
@@ -363,7 +398,7 @@ void validateGradient(std::ofstream& csv){
         std::vector<float> adj = getParameter(gradient,j);
         saveBin("gradiente_" + parameters[j] + "_operator", adj, NZ, NX);
         saveBin("gradiente_" + parameters[j] + "_fd", fd, NZ, NX);
-        saveMetrics(csv, "gradient", j, j, H, adj, fd);
+        saveMetrics(csv, "gradient", j, j, perturbation[j]/parameterScale(pmt,j), adj, fd);
     }
 
     std::remove(observedFile.c_str());
@@ -385,23 +420,30 @@ void validateBornAndHessian(std::ofstream& csv){
     const int point = 10*NX+10;
     std::vector<float> model = createInitialModel();
 
+    double energy[3] = {0.0, 0.0, 0.0};
     for(int j = 0; j < 3; j++){
         std::vector<float> direction(3*n_model,0.0f);
-        direction[j*n_model+point] = 1.0f;
+        direction[j*n_model+point] = float(perturbation[j]/parameterScale(pmt,j));
         std::vector<float> bornData = bornModeling(pmt,mdl,mgt,inv,model,direction,false);
         std::vector<float> plus = model;
         std::vector<float> minus = model;
-        plus[j*n_model+point] = float(double(model[j*n_model+point]) + H*scale[j]);
-        minus[j*n_model+point] = float(double(model[j*n_model+point]) - H*scale[j]);
-        double realStep = (double(plus[j*n_model+point])-minus[j*n_model+point])/scale[j];
+        const int k = j*n_model+point;
+        const double physicalDirection = parameterScale(pmt,j)*double(direction[k]);
+        plus[k] = float(double(model[k]) + H*physicalDirection);
+        minus[k] = float(double(model[k]) - H*physicalDirection);
+        double realStep = (double(plus[k])-minus[k]) / physicalDirection;
+        if(realStep == 0.0){
+            throw std::runtime_error("Born step too small for float32.");
+        }
         std::vector<float> dp = forwardModeling(pmt,mdl,inv,plus);
         std::vector<float> dm = forwardModeling(pmt,mdl,inv,minus);
         for(int i = 0; i < int(dp.size()); i++){
             dp[i] = float((double(dp[i])-dm[i])/realStep);
         }
+        energy[j] = calculateNorm(bornData) * calculateNorm(bornData);
         saveBin("born_" + parameters[j] + "_operator", bornData, pmt.nt_data, pmt.Nrec);
         saveBin("born_" + parameters[j] + "_fd", dp, pmt.nt_data, pmt.Nrec);
-        saveMetrics(csv, "born", j, j, H, bornData, dp);
+        saveMetrics(csv, "born", j, j, double(direction[j*n_model+point]), bornData, dp);
     }
 
     std::vector<float> d0 = forwardModeling(pmt,mdl,inv,model);
@@ -412,18 +454,25 @@ void validateBornAndHessian(std::ofstream& csv){
     std::vector<float> columns[3];
     for(int j = 0; j < 3; j++){
         std::vector<float> direction(3*n_model,0.0f);
-        direction[j*n_model+point] = 1.0f;
+        direction[j*n_model+point] = float(perturbation[j]/parameterScale(pmt,j));
         std::vector<float> hx = hessianVectorProduct(pmt,mdl,mgt,inv,model,direction);
         columns[j] = hx;
-        csv << "curvature," << j << "," << j << ",0,0," << hx[j*n_model+point] << ",0\n";
+        double curvature = double(direction[j*n_model+point]) * hx[j*n_model+point];
+        double energyDen = std::max(std::abs(curvature), energy[j]);
+        double energyError = energyDen > 0.0 ?
+                             std::abs(curvature - energy[j])/energyDen : 0.0;
+        csv << "curvature," << j << "," << j << ",0," << energyError
+            << "," << curvature << "," << energy[j] << "\n";
 
         double h = H;
         for(int s = 0; s < 4; s++){
             std::vector<float> plus = model;
             std::vector<float> minus = model;
-            plus[j*n_model+point] = float(double(model[j*n_model+point]) + h*scale[j]);
-            minus[j*n_model+point] = float(double(model[j*n_model+point]) - h*scale[j]);
-            double realStep = (double(plus[j*n_model+point])-minus[j*n_model+point])/scale[j];
+            const int k = j*n_model+point;
+            const double physicalDirection = parameterScale(pmt,j)*double(direction[k]);
+            plus[k] = float(double(model[k]) + h*physicalDirection);
+            minus[k] = float(double(model[k]) - h*physicalDirection);
+            double realStep = (double(plus[k])-minus[k]) / physicalDirection;
             if(realStep == 0.0){
                 throw std::runtime_error("Hessian step too small.");
             }
@@ -433,14 +482,14 @@ void validateBornAndHessian(std::ofstream& csv){
             for(int b = 0; b < 3; b++){
                 std::vector<float> fd(n_model);
                 for(int i = 0; i < n_model; i++){
-                    fd[i] = float(scale[b]*(double(gp[b*n_model+i])-gm[b*n_model+i])/realStep);
+                    fd[i] = float((double(gp[b*n_model+i])-gm[b*n_model+i])/realStep);
                 }
                 std::vector<float> result = getParameter(hx,b);
                 std::ostringstream filename;
                 filename << "hessiana_" << parameters[j] << "_para_" << parameters[b] << "_h" << std::fixed << std::setprecision(5) << h;
                 saveBin(filename.str()+"_operator", result, NZ, NX);
                 saveBin(filename.str()+"_fd", fd, NZ, NX);
-                saveMetrics(csv, "hessian", j, b, h, result, fd);
+                saveMetrics(csv, "hessian", j, b, h*double(direction[j*n_model+point]), result, fd);
             }
             h /= 2.0;
         }
@@ -448,8 +497,10 @@ void validateBornAndHessian(std::ofstream& csv){
 
     for(int a = 0; a < 3; a++){
         for(int b = a+1; b < 3; b++){
-            double hab = columns[b][a*n_model+point];
-            double hba = columns[a][b*n_model+point];
+            const double direction_b = float(perturbation[b]/parameterScale(pmt,b));
+            const double direction_a = float(perturbation[a]/parameterScale(pmt,a));
+            double hab = double(columns[b][a*n_model+point]) / direction_b;
+            double hba = double(columns[a][b*n_model+point]) / direction_a;
             double denominator = std::max(std::abs(hab),std::abs(hba));
             double error = 0.0;
             if(denominator != 0.0){
