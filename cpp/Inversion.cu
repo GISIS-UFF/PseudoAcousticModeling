@@ -534,12 +534,12 @@ float Inversion::calculateGradient(const std::string &parameter, float *gradient
     const int n_model = pmt->nx * pmt->nz;
     cudaMemcpy(gradient, gradient_device, n_model * sizeof(float), cudaMemcpyDeviceToHost);
 
-    #pragma omp parallel for
-    for (int i = 0; i < n_model; i++) {
-        if (water_mask[i]) {
-            gradient[i] = 0.0f;
-        }
-    }
+    // #pragma omp parallel for
+    // for (int i = 0; i < n_model; i++) {
+    //     if (water_mask[i]) {
+    //         gradient[i] = 0.0f;
+    //     }
+    // }
 
     pmt->multiparameter = multiparameter;
     return X_current;
@@ -579,15 +579,15 @@ float Inversion::calculateMultiparameterGradient(const bool update_eps, const bo
     const float s2_max = 1.0f / (pmt->vmin * pmt->vmin);
 
     for (int i = 0; i < n_model; ++i) {
-        if (water_mask[i]) {
-            grads[i] = 0.0;
-            grads[n_model + i] = 0.0;
-            grads[2 * n_model + i] = 0.0;
-        } else {
-            grads[i] *= s2_max - s2_min;
-            grads[n_model + i] *= pmt->epsmax - pmt->epsmin;
-            grads[2 * n_model + i] *= pmt->deltamax - pmt->deltamin;
-        }
+        // if (water_mask[i]) {
+        //     grads[i] = 0.0;
+        //     grads[n_model + i] = 0.0;
+        //     grads[2 * n_model + i] = 0.0;
+        // } else {
+        grads[i] *= s2_max - s2_min;
+        grads[n_model + i] *= pmt->epsmax - pmt->epsmin;
+        grads[2 * n_model + i] *= pmt->deltamax - pmt->deltamin;
+        // }
     }
 
     pmt->multiparameter = multiparameter;
@@ -887,8 +887,8 @@ void Inversion::setModel() {
     float *v_h = new float[n_model]();
 
     mdl->importBin(pmt->vpFile, v_h, n_model);
-    water_mask = mgt->createMask(v_h);
-    mgt->smoothModel(v_h, water_mask, false);
+    // water_mask = mgt->createMask(v_h);
+    // mgt->smoothModel(v_h, water_mask, false);
     const std::string vp_smooth_file = pmt->modelFolder + "fwi_vp_smooth_" + pmt->approximation +
                                        "_Nx" + std::to_string(pmt->nx) + "_Nz" +
                                        std::to_string(pmt->nz) + ".bin";
@@ -903,12 +903,12 @@ void Inversion::setModel() {
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI") {
         mdl->importBin(pmt->epsilonFile, eps_h, n_model);
-        mgt->smoothModel(eps_h, water_mask, true);
+        // mgt->smoothModel(eps_h, water_mask, true);
 
         ExpandModelDevice("epsilon", eps_h);
 
         mdl->importBin(pmt->deltaFile, delta_h, n_model);
-        mgt->smoothModel(delta_h, water_mask, true);
+        // mgt->smoothModel(delta_h, water_mask, true);
 
         ExpandModelDevice("delta", delta_h);
 
@@ -918,7 +918,7 @@ void Inversion::setModel() {
 
     if (pmt->approximation == "TTI") {
         mdl->importBin(pmt->thetaFile, theta_h, n_model);
-        mgt->smoothModel(theta_h, water_mask, true);
+        // mgt->smoothModel(theta_h, water_mask, true);
 
     #pragma omp parallel for
         for (int i = 0; i < n_model; i++) {
@@ -1245,7 +1245,7 @@ float Inversion::computeEisenstatWalker(const std::vector<float> &grads, const s
     float num2 = 0.0;
     float den2 = 0.0;
 
-#pragma omp parallel for reduction(+ : num2, den2)
+    #pragma omp parallel for reduction(+ : num2, den2)
     for (int i = 0; i < n; ++i) {
         const float gi = grads[i];
         const float gi_past = grad_past[i];
@@ -1267,7 +1267,7 @@ float Inversion::computeEisenstatWalker(const std::vector<float> &grads, const s
     if (nk > 1.0)
         nk = 0.9;
 
-    return static_cast<float>(nk);
+    return nk;
 }
 
 void Inversion::solveGaussNewton(std::vector<float> &g, const float nk, const float grad_norm, const bool update_eps, const bool update_delta) {
@@ -1346,15 +1346,13 @@ void Inversion::convertNormalizedAndPhysical(const bool to_physical, std::vector
         for (int i = 0; i < n_model; ++i) {
             models[i] = s2_min + (s2_max - s2_min) * models[i];
             models[n_model + i] = (models[n_model + i] * (pmt->epsmax - pmt->epsmin)) + pmt->epsmin;
-            models[2 * n_model + i] =
-                (models[2 * n_model + i] * (pmt->deltamax - pmt->deltamin)) + pmt->deltamin;
+            models[2 * n_model + i] = (models[2 * n_model + i] * (pmt->deltamax - pmt->deltamin)) + pmt->deltamin;
         }
     } else {
         for (int i = 0; i < n_model; ++i) {
             models[i] = (models[i] - s2_min) / (s2_max - s2_min);
             models[n_model + i] = (models[n_model + i] - pmt->epsmin) / (pmt->epsmax - pmt->epsmin);
-            models[2 * n_model + i] =
-                (models[2 * n_model + i] - pmt->deltamin) / (pmt->deltamax - pmt->deltamin);
+            models[2 * n_model + i] = (models[2 * n_model + i] - pmt->deltamin) / (pmt->deltamax - pmt->deltamin);
         }
     }
 }
@@ -1413,8 +1411,7 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical() {
         for (int itr = 0; itr < pmt->niter; itr++) {
             const int iteration = itr + 1;
 
-            std::cout << "info: FWI iteration " << iteration << "/" << pmt->niter
-                      << " for frequency " << fmax << std::endl;
+            std::cout << "info: FWI iteration " << iteration << "/" << pmt->niter << " for frequency " << fmax << std::endl;
 
             std::ostringstream fcut_stream;
             fcut_stream << std::fixed << std::setprecision(1) << fmax;
@@ -1540,6 +1537,191 @@ void Inversion::solveFullWaveformInversionMultiparameterHierarchical() {
     history_stream.close();
 
     std::cout << "info: FWI history saved to " << history_file << std::endl;
+}
+
+void Inversion::validategradient(const float h){
+    const int n_model = pmt->nx * pmt->nz;
+
+    const std::vector<float> model0 = models;
+
+    std::vector<float> implemented;
+    std::vector<float> fd(3 * n_model, 0.0f);
+    std::vector<float> diff(3 * n_model, 0.0f);
+
+    calculateMultiparameterGradient(true, true, implemented, models, false);
+
+    for(int j = 0; j < 3; j++){
+        for(int i = 0; i < n_model; i++){
+
+            const int k = j * n_model + i;
+
+            std::vector<float> physical = model0;
+            physical[k] += h;
+
+            convertNormalizedAndPhysical(true, physical);
+            uploadPhysicalModels(physical);
+
+            const float X_plus = ObjectiveFunction();
+
+            physical = model0;
+            physical[k] -= h;
+
+            convertNormalizedAndPhysical(true, physical);
+            uploadPhysicalModels(physical);
+
+            const float X_minus = ObjectiveFunction();
+
+            fd[k] = (X_plus - X_minus) / (2.0 * h);
+        }
+    }
+
+    for(int k = 0; k < 3 * n_model; k++){
+        diff[k] = implemented[k] - fd[k];
+    }
+
+    const std::string names[3] = {"s2", "epsilon", "delta"};
+
+    for(int j = 0; j < 3; j++){
+        const std::string prefix = pmt->gradientsFolder + "gradient_" + names[j];
+        saveModel(prefix + "_implemented.bin", implemented.data() + j * n_model);
+        saveModel(prefix + "_fd.bin", fd.data() + j * n_model);
+        saveModel(prefix + "_diff.bin", diff.data() + j * n_model);
+    }
+
+    std::vector<float> physical = model0;
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+}
+
+void Inversion::validateborn(const std::vector<float>& direction, const float h){
+    const int n_model = pmt->nx * pmt->nz;
+    const int n_seis = pmt->Nrec * pmt->nt_data;
+
+    const std::vector<float> model0 = models;
+
+    std::vector<float> implemented(n_seis);
+    std::vector<float> data_plus(n_seis);
+    std::vector<float> data_minus(n_seis);
+    std::vector<float> fd(n_seis);
+    std::vector<float> diff(n_seis);
+
+    std::vector<float> physical = model0;
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+
+    setBornPerturbation(direction);
+    computeHessianVectorProduct();
+
+    cudaMemcpy(implemented.data(), mdl->seismogram, n_seis * sizeof(float), cudaMemcpyDeviceToHost);
+
+    physical = model0;
+
+    for(int k = 0; k < 3 * n_model; k++){
+        physical[k] += h * direction[k];
+    }
+
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+    ObjectiveFunction();
+
+    cudaMemcpy(data_plus.data(), mdl->seismogram, n_seis * sizeof(float), cudaMemcpyDeviceToHost);
+
+    physical = model0;
+
+    for(int k = 0; k < 3 * n_model; k++){
+        physical[k] -= h * direction[k];
+    }
+
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+    ObjectiveFunction();
+
+    cudaMemcpy(data_minus.data(), mdl->seismogram, n_seis * sizeof(float), cudaMemcpyDeviceToHost);
+
+    for(int i = 0; i < n_seis; i++){
+        fd[i] = (data_plus[i] - data_minus[i]) / (2.0 * h);
+
+        diff[i] = implemented[i] - fd[i];
+    }
+
+    const std::string names[3] = {"born_implemented.bin", "born_fd.bin", "born_diff.bin"};
+    const float* data[3] = {implemented.data(), fd.data(), diff.data()};
+
+    for(int j = 0; j < 3; j++){
+        std::ofstream file(pmt->gradientsFolder + names[j], std::ios::binary);
+        file.write((char*)data[j],n_seis * sizeof(float));
+    }
+
+    physical = model0;
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+}
+
+void Inversion::validateHessian(const std::vector<float>& direction, const float h){
+    const int n_model = pmt->nx * pmt->nz;
+    const int n = 3 * n_model;
+    const float s2_min = 1.0f / (pmt->vmax * pmt->vmax);
+    const float s2_max = 1.0f / (pmt->vmin * pmt->vmin);
+
+    const std::vector<float> model0 = models;
+
+    std::vector<float> implemented(n, 0.0f);
+    std::vector<float> grad_plus;
+    std::vector<float> grad_minus;
+    std::vector<float> fd(n, 0.0f);
+    std::vector<float> diff(n, 0.0f);
+
+    
+    std::vector<float> physical = model0;
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
+
+    setBornPerturbation(direction);
+    computeHessianVectorProduct();
+    
+    cudaMemcpy(implemented.data(), mgt->image, n_model * sizeof(float),cudaMemcpyDeviceToHost);
+    cudaMemcpy(implemented.data() + n_model, eps_grad, n_model * sizeof(float),cudaMemcpyDeviceToHost);
+    cudaMemcpy(implemented.data() + 2 * n_model, delta_grad, n_model * sizeof(float),cudaMemcpyDeviceToHost);
+
+    const float range[3] = {s2_max - s2_min, pmt->epsmax - pmt->epsmin, pmt->deltamax - pmt->deltamin};
+    for(int i = 0; i < n; i++){
+        const int j = i / n_model;
+
+        implemented[i] *= -range[j];
+    }
+
+    for(int k = 0; k < n; k++){
+        models[k] = model0[k] + h * direction[k];
+    }
+
+    calculateMultiparameterGradient(true, true, grad_plus, models, false);
+
+    for(int k = 0; k < n; k++){
+        models[k] = model0[k] - h * direction[k];
+    }
+
+    calculateMultiparameterGradient( true, true, grad_minus, models, false);
+
+    for(int k = 0; k < n; k++){
+        fd[k] = (grad_plus[k] - grad_minus[k]) / (2.0 * h);
+
+        diff[k] = implemented[k] - fd[k];
+    }
+
+    const std::string names[3] = {"s2", "epsilon", "delta"};
+
+    for(int j = 0; j < 3; j++){
+        const std::string prefix = pmt->gradientsFolder + "hessian_" + names[j];
+        saveModel(prefix + "_implemented.bin", implemented.data() + j * n_model);
+        saveModel(prefix + "_fd.bin", fd.data() + j * n_model);
+        saveModel(prefix + "_diff.bin", diff.data() + j * n_model);
+    }
+
+    models = model0;
+
+    physical = model0;
+    convertNormalizedAndPhysical(true, physical);
+    uploadPhysicalModels(physical);
 }
 
 __global__ void computeObjectiveFunction(float *X, float *__restrict__ residual, const float *__restrict__ calculated, const int nt, const int Nrec) {

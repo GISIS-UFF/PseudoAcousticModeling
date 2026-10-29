@@ -107,6 +107,11 @@ public:
     void solveGaussNewton(std::vector<float> &g, const float nk, const float grad_norm, const bool update_eps, const bool update_delta);
     void convertNormalizedAndPhysical(const bool to_physical, std::vector<float> &models);
     void solveFullWaveformInversionMultiparameterHierarchical();
+    
+    //Validação
+    void validategradient(const float h);
+    void validateborn(const std::vector<float>& direction, const float h);
+    void validateHessian(const std::vector<float>& direction, const float h);
 };
 
 __global__ void computeObjectiveFunction(float *X, float *__restrict__ residual, const float *__restrict__ calculated, const int nt, const int Nrec);
