@@ -485,7 +485,7 @@ __global__ void storeSeismogram(const double* current, double* seismogram, const
     seismogram[it * Nrec + irec] = current[rz[irec] * nx_abc + rx[irec]];
 }
 
-__global__ void updateWaveEquation(double* __restrict__ Uf, const double* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+__global__ void updateWaveEquation(double* __restrict__ Uf, double* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
     const double c0 = -2.847222222222;
     const double c1 =  1.6;
     const double c2 = -0.2;
@@ -520,23 +520,23 @@ __global__ void updateWaveEquation(double* __restrict__ Uf, const double* __rest
             + c4 * (Uc[i + 4*nx] + Uc[i - 4*nx])) * inv_dz2;
 
         Uf[i] = vp2 * dt2 * (pxx + pzz) + 2.0 * Uc[i] - Uf[i];
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
     }
 
     if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&
@@ -546,7 +546,7 @@ __global__ void updateWaveEquation(double* __restrict__ Uf, const double* __rest
     }
 }
 
-__global__ void updateWaveEquationVTI(double* __restrict__ Uf, const double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+__global__ void updateWaveEquationVTI(double* __restrict__ Uf, double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
     const double c0 = -2.847222222222;
     const double c1 =  1.6;
     const double c2 = -0.2;
@@ -612,23 +612,23 @@ __global__ void updateWaveEquationVTI(double* __restrict__ Uf, const double* __r
         const double Sd = num / (den + 1e-37);  
 
         Uf[i] = 2.0 * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0+ 2.0*eps) + Sd) * pxx + vp2 * dt2 *(1.0 + Sd) * pzz;
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
     }
 
     if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&
@@ -638,7 +638,7 @@ __global__ void updateWaveEquationVTI(double* __restrict__ Uf, const double* __r
     }
 }
 
-__global__ void updateWaveEquationTTI(double* __restrict__ Uf, const double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+__global__ void updateWaveEquationTTI(double* __restrict__ Uf, double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
     const double c0 = -2.847222222222;
     const double c1 =  1.6;
     const double c2 = -0.2;
@@ -732,23 +732,23 @@ __global__ void updateWaveEquationTTI(double* __restrict__ Uf, const double* __r
         const double Sd = num / (den + 1e-37);
 
         Uf[i] = 2.0*Uc[i] - Uf[i] + vp2*dt2*((1.0 + 2.0*eps)*cos2 + s2 + Sd)*pxx + vp2*dt2*((1.0 + 2.0*eps)*s2 + cos2 + Sd)*pzz - 2.0*eps*vp2*dt2*sin2th*pxz;
-    }
-
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
+        
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
     }
     
     if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&

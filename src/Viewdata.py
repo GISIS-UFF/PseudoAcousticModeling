@@ -18,26 +18,6 @@ class plotting:
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cbar = fig.colorbar(im,cax=cax)
         return cbar
-    
-    def laplacian_filter(self, f):
-        dim1,dim2 = np.shape(f)
-        g = np.zeros([dim1,dim2])
-        lap_z = 0
-        lap_x = 0
-        for ix in range(1, dim2 - 1):
-            for iz in range(1, dim1 - 1):
-                lap_z = f[iz+1, ix] + f[iz-1, ix] - 2 * f[iz, ix]
-                lap_x = f[iz, ix+1] + f[iz, ix-1] - 2 * f[iz, ix]
-                g[iz, ix] = lap_z/(self.pmt.dz*self.pmt.dz) + lap_x/(self.pmt.dx*self.pmt.dx)
-
-        for ix in range(dim2):
-            g[0, ix] = g[1, ix]
-            g[-1, ix] = g[-2, ix]
-        for iz in range(dim1):
-            g[iz, 0] = g[iz, 1]
-            g[iz, -1] = g[iz, -2]
-
-        return(-g)
 
     def laplacian_filter(self, f):
         dim1,dim2 = np.shape(f)

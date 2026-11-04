@@ -20,6 +20,8 @@ auto ti = std::chrono::system_clock::now();
 
     mdl.createWavelet();
     mdl.createCerjanVector();
+    std::vector<float> A_unit(pmt.N_abc, 1.0f);
+    cudaMemcpy(mdl.A, A_unit.data(), A_unit.size() * sizeof(float), cudaMemcpyHostToDevice);
     
     // if(pmt.multiparameter){
     //     inv.solveFullWaveformInversionMultiparameterHierarchical();
@@ -59,9 +61,9 @@ auto ti = std::chrono::system_clock::now();
 
     }
 
-    // inv.validategradient(0.00125f);
-    // inv.validateborn(direction, 0.1f);
-    inv.validateHessian(direction, 0.1f);
+    inv.validategradient(0.001f);
+    // inv.validateborn(direction, 0.001f);
+    // inv.validateHessian(direction, 0.001f);
 
     inv.freeMemory();
     mgt.freeMemory();

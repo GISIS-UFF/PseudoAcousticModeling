@@ -167,7 +167,9 @@ void Inversion::readObsSeismogram(const int shot, double *obs_h) {
     fcut_stream << std::fixed << std::setprecision(1) << pmt->fcut;
     std::string seismogramFile = pmt->seismogramFolder + "seismogram_shot_" + std::to_string(shot + 1) + "_Nt" + std::to_string(pmt->nt_data) + "_Nrec" + std::to_string(pmt->Nrec) + "_fcut" + fcut_stream.str() + ".bin";
     std::ifstream file(seismogramFile, std::ios::binary);
-    file.read((char*)obs_h, n_seis * sizeof(double));
+    if (!file.read((char*)obs_h, n_seis * sizeof(double))) {
+        throw std::runtime_error("Falha ao ler o observado: " + seismogramFile);
+    }
 }
 
 void Inversion::resetGradients() {
@@ -224,12 +226,12 @@ double Inversion::calculateGradientOntheFly(bool TGN) {
             mdl->forward_step();
             injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz, pmt->dx, pmt->dz, pmt->dt);
             if (k >= pmt->itlag) {
-                storeSeismogram<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>( mdl->current, mdl->seismogram, mdl->rx, mdl->rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
+                storeSeismogram<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>(mdl->current, mdl->seismogram, mdl->rx, mdl->rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
             }
             cudaMemcpyAsync(mgt->savefield + k * n_model_exp, mdl->current, n_model_exp * sizeof(double), cudaMemcpyDeviceToDevice, mdl->compute_stream);
             std::swap(mdl->current, mdl->future);
         }
-        computeObjectiveFunction<<<XBlocks, nThreads, 0, mdl->compute_stream>>>( X, residual, mdl->seismogram, pmt->nt_data, pmt->Nrec);
+        computeObjectiveFunction<<<XBlocks, nThreads, 0, mdl->compute_stream>>>(X, residual, mdl->seismogram, pmt->nt_data, pmt->Nrec);
         if (shot + 1 < pmt->Nshot) {
             readObsSeismogram(shot + 1, obs_buffer);
             cudaMemcpyAsync(residual_buffer, obs_buffer, n_seis * sizeof(double), cudaMemcpyHostToDevice, mdl->copy_stream);
@@ -241,7 +243,7 @@ double Inversion::calculateGradientOntheFly(bool TGN) {
 
             if (t >= pmt->itlag) {
                 int it = t - pmt->itlag;
-                injectAdjointSource<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>( mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dt, mdl->vp);
+                injectAdjointSource<<<mdl->seisBlocks, nThreads, 0, mdl->compute_stream>>>(mgt->futurebck, residual, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dt, mdl->vp);
             }
 
             std::swap(mgt->currentbck, mgt->futurebck);
@@ -1639,23 +1641,24 @@ __global__ void updateAdjointWaveEquationandGradient(float *__restrict__ Uf, flo
             s2_grad[idx] += Uc[i] * s2_product;
         }
 
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
-    if (ix < N_abc){
-        Uf[i] *= A[ix];
-        Uc[i] *= A[ix];
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= A[nx - 1 - ix];
-        Uc[i] *= A[nx - 1 - ix];
-    }
-    if (iz < N_abc){
-        Uf[i] *= A[iz];
-        Uc[i] *= A[iz];
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= A[nz - 1 - iz];
-        Uc[i] *= A[nz - 1 - iz];
-    }
+    
 }
 
 __global__ void calculateAdjointVTIProductsAndGradients(const float *__restrict__ Uc, const double *__restrict__ P, float *__restrict__ AUc, float *__restrict__ BUc, float *__restrict__ QCxUc, float *__restrict__ QCzUc, float *__restrict__ s2_grad, float *__restrict__ eps_grad, float *__restrict__ delta_grad, const float *__restrict__ vp, const float *__restrict__ epsilon, const float *__restrict__ delta, const float dt, const float dx, const float dz, const int nx, const int nz, const int N_abc, const bool multiparameter, float *__restrict__ B_s2, float *__restrict__ B_eps, float *__restrict__ B_delta, const bool TGN) {
@@ -1835,23 +1838,23 @@ __global__ void updateAdjointWaveEquationVTI(float *__restrict__ Uf, float *__re
         const float spatial_operator = dxx_AUc + dzz_BUc - dx_QCxUc - dz_QCzUc;
         const float vp2dt2 = vp[i] * vp[i] * dt * dt;
         Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2dt2 * spatial_operator;
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= A[ix];
-        Uc[i] *= A[ix];
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= A[nx - 1 - ix];
-        Uc[i] *= A[nx - 1 - ix];
-    }
-    if (iz < N_abc){
-        Uf[i] *= A[iz];
-        Uc[i] *= A[iz];
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= A[nz - 1 - iz];
-        Uc[i] *= A[nz - 1 - iz];
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
@@ -2097,23 +2100,23 @@ __global__ void updateAdjointWaveEquationTTI(float *__restrict__ Uf, float *__re
         const float vp2dt2 = vp[i] * vp[i] * dt * dt;
 
         Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2dt2 * spatial_operator;
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= A[ix];
-        Uc[i] *= A[ix];
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= A[nx - 1 - ix];
-        Uc[i] *= A[nx - 1 - ix];
-    }
-    if (iz < N_abc){
-        Uf[i] *= A[iz];
-        Uc[i] *= A[iz];
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= A[nz - 1 - iz];
-        Uc[i] *= A[nz - 1 - iz];
+        if (ix < N_abc){
+            Uf[i] *= A[ix];
+            Uc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= A[nx - 1 - ix];
+            Uc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            Uf[i] *= A[iz];
+            Uc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= A[nz - 1 - iz];
+            Uc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
@@ -2230,48 +2233,44 @@ __global__ void updateWaveEquationVTIBornTGN(double *__restrict__ dUf, double *_
         float born_source_anisotropy = 2.0f * deps_i * u0_xx + dSd_m * (u0_xx + u0_zz);
 
         dUf[i] = 2.0f * dUc[i] - dUf[i] + dt2 * vp2 * (propagation + born_source_s2 + born_source_anisotropy);
-    }
 
-    if (ix < N_abc){
-        U0f[i] *= A[ix];
-        U0c[i] *= A[ix];
-        dUf[i] *= A[ix];
-        dUc[i] *= A[ix];
-    }
-    if (ix >=  nx - N_abc){
-        U0f[i] *= A[nx - 1 - ix];
-        U0c[i] *= A[nx - 1 - ix];
-        dUf[i] *= A[nx - 1 - ix];
-        dUc[i] *= A[nx - 1 - ix];
-    }
-    if (iz < N_abc){
-        U0f[i] *= A[iz];
-        U0c[i] *= A[iz];
-        dUf[i] *= A[iz];
-        dUc[i] *= A[iz];
-    }
-    if (iz >= nz - N_abc){
-        U0f[i] *= A[nz - 1 - iz];
-        U0c[i] *= A[nz - 1 - iz];
-        dUf[i] *= A[nz - 1 - iz];
-        dUc[i] *= A[nz - 1 - iz];
+        if (ix < N_abc){
+            U0f[i] *= A[ix];
+            U0c[i] *= A[ix];
+            dUf[i] *= A[ix];
+            dUc[i] *= A[ix];
+        }
+        if (ix >=  nx - N_abc){
+            U0f[i] *= A[nx - 1 - ix];
+            U0c[i] *= A[nx - 1 - ix];
+            dUf[i] *= A[nx - 1 - ix];
+            dUc[i] *= A[nx - 1 - ix];
+        }
+        if (iz < N_abc){
+            U0f[i] *= A[iz];
+            U0c[i] *= A[iz];
+            dUf[i] *= A[iz];
+            dUc[i] *= A[iz];
+        }
+        if (iz >= nz - N_abc){
+            U0f[i] *= A[nz - 1 - iz];
+            U0c[i] *= A[nz - 1 - iz];
+            dUf[i] *= A[nz - 1 - iz];
+            dUc[i] *= A[nz - 1 - iz];
+        }
     }
 }
 
-
-
 void Inversion::validategradient(const float h){
-    if (!(h > 0.0f) || !std::isfinite(h) || !pmt->multiparameter || pmt->approximation != "VTI"){
-        throw std::runtime_error("Info: Use h positivo, VTI e multiparameter=true.");
-    }
     const int n_model = pmt->nx * pmt->nz;
-    if (models.size() != size_t(3 * n_model)){
-        throw std::runtime_error("Info: Initialize normalized models before validation.");
-    }
     const std::vector<float> model0 = models;
     std::vector<float> implemented;
     std::vector<float> fd(3 * n_model, 0.0f);
     std::vector<float> diff(3 * n_model, 0.0f);
+
+    std::vector<float> background_physical = model0;
+    convertNormalizedAndPhysical(true, background_physical);
+    uploadPhysicalModels(background_physical);
 
     calculateMultiparameterGradient(true, true, implemented, models, false);
     for (int j = 0; j < 3; j++){
@@ -2279,19 +2278,16 @@ void Inversion::validategradient(const float h){
             const int k = j * n_model + i;
             std::vector<float> physical = model0;
             physical[k] += h;
-            const double m_plus = physical[k];
             convertNormalizedAndPhysical(true, physical);
             uploadPhysicalModels(physical);
             const double X_plus = ObjectiveFunction();
 
             physical = model0;
             physical[k] -= h;
-            const double m_minus = physical[k];
             convertNormalizedAndPhysical(true, physical);
             uploadPhysicalModels(physical);
             const double X_minus = ObjectiveFunction();
-            if (m_plus == m_minus) throw std::runtime_error("Info: h too small for float model.");
-            fd[k] = float((X_plus - X_minus) / (m_plus - m_minus));
+            fd[k] = float((X_plus - X_minus) / (2.0 * double(h)));
         }
     }
     for (int k = 0; k < 3 * n_model; k++){
@@ -2303,11 +2299,6 @@ void Inversion::validategradient(const float h){
         saveModel(prefix + "_implemented.bin", implemented.data() + j * n_model);
         saveModel(prefix + "_fd.bin", fd.data() + j * n_model);
         saveModel(prefix + "_diff.bin", diff.data() + j * n_model);
-        const std::vector<float> a(implemented.begin() + j * n_model, implemented.begin() + (j + 1) * n_model);
-        const std::vector<float> d(diff.begin() + j * n_model, diff.begin() + (j + 1) * n_model);
-        const double norm = norm_vector(a);
-        std::cout << "GRADIENT parameter=" << names[j] << " relative_error="
-                  << (norm > 0.0 ? norm_vector(d) / norm : norm_vector(d)) << std::endl;
     }
     models = model0;
     std::vector<float> physical = model0;
@@ -2318,14 +2309,13 @@ void Inversion::validategradient(const float h){
 void Inversion::validateborn(const std::vector<float>& direction, const float h){
     const int n_model = pmt->nx * pmt->nz;
     const int n_seis = pmt->Nrec * pmt->nt_data;
-    if (pmt->Nshot != 1 || pmt->approximation != "VTI" || !pmt->multiparameter ||
-        direction.size() != size_t(3 * n_model) || models.size() != direction.size() ||
-        !(h > 0.0f) || !std::isfinite(h)){
-        throw std::runtime_error("Info: Use VTI, uma fonte, multiparameter=true, models/direction normalizados e h positivo.");
-    }
+
     const std::vector<float> model0 = models;
-    std::vector<double> implemented(n_seis), data_plus(n_seis), data_minus(n_seis);
-    std::vector<double> fd(n_seis), diff(n_seis);
+    std::vector<double> implemented(n_seis);
+    std::vector<double> data_plus(n_seis);
+    std::vector<double> data_minus(n_seis);
+    std::vector<double> fd(n_seis); 
+    std::vector<double> diff(n_seis);
     std::vector<float> physical = model0;
     convertNormalizedAndPhysical(true, physical);
     uploadPhysicalModels(physical);
@@ -2334,32 +2324,32 @@ void Inversion::validateborn(const std::vector<float>& direction, const float h)
     cudaMemcpy(implemented.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
 
     physical = model0;
-    for (int k = 0; k < 3 * n_model; k++) physical[k] += h * direction[k];
+    for (int k = 0; k < 3 * n_model; k++){
+        physical[k] += h * direction[k];
+    }
     convertNormalizedAndPhysical(true, physical);
     uploadPhysicalModels(physical);
     ObjectiveFunction();
     cudaMemcpy(data_plus.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
 
     physical = model0;
-    for (int k = 0; k < 3 * n_model; k++) physical[k] -= h * direction[k];
+    for (int k = 0; k < 3 * n_model; k++){
+        physical[k] -= h * direction[k];
+    }
     convertNormalizedAndPhysical(true, physical);
     uploadPhysicalModels(physical);
     ObjectiveFunction();
     cudaMemcpy(data_minus.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
-    double error = 0.0, norm = 0.0;
     for (int i = 0; i < n_seis; i++){
         fd[i] = (data_plus[i] - data_minus[i]) / (2.0 * double(h));
         diff[i] = implemented[i] - fd[i];
-        error += diff[i] * diff[i];
-        norm += implemented[i] * implemented[i];
     }
     const std::string names[3] = {"born_implemented.bin", "born_fd.bin", "born_diff.bin"};
     const double* data[3] = {implemented.data(), fd.data(), diff.data()};
     for (int j = 0; j < 3; j++){
         std::ofstream file(pmt->gradientsFolder + names[j], std::ios::binary);
-        if (!file.write((const char*)data[j], n_seis * sizeof(double))) throw std::runtime_error("Info: Could not save Born validation.");
+        file.write((const char*)data[j], n_seis * sizeof(double));
     }
-    std::cout << "BORN relative_error=" << (norm > 0.0 ? std::sqrt(error / norm) : std::sqrt(error)) << std::endl;
     models = model0;
     physical = model0;
     convertNormalizedAndPhysical(true, physical);
@@ -2370,32 +2360,28 @@ void Inversion::validateHessian(const std::vector<float>& direction, const float
     const int n_model = pmt->nx * pmt->nz;
     const int n = 3 * n_model;
     const int n_seis = pmt->Nrec * pmt->nt_data;
-    if (pmt->Nshot != 1 || pmt->approximation != "VTI" || !pmt->multiparameter ||
-        direction.size() != size_t(n) || models.size() != direction.size() ||
-        !(h > 0.0f) || !std::isfinite(h) || !validation_observed.empty()){
-        throw std::runtime_error("Info: Use VTI, uma fonte, multiparameter=true, models/direction normalizados e h positivo.");
-    }
     const std::vector<float> model0 = models;
     const std::string names[3] = {"s2", "epsilon", "delta"};
     const float s2_min = 1.0f / (pmt->vmax * pmt->vmax);
     const float s2_max = 1.0f / (pmt->vmin * pmt->vmin);
-    const float range[3] = {s2_max - s2_min, pmt->epsmax - pmt->epsmin, pmt->deltamax - pmt->deltamin};
+    const float norm[3] = {s2_max - s2_min, pmt->epsmax - pmt->epsmin, pmt->deltamax - pmt->deltamin};
 
     std::vector<float> physical = model0;
     convertNormalizedAndPhysical(true, physical);
     uploadPhysicalModels(physical);
     ObjectiveFunction();
-    // Observado temporario = dado do fundo. No fundo, Hessiana completa = J^T J.
     validation_observed.resize(n_seis);
     cudaMemcpy(validation_observed.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
 
+    validation_observed.clear();
     for (int j = 0; j < 3; j++){
         std::vector<float> direction_j(n, 0.0f);
         std::copy_n(direction.data() + j * n_model, n_model, direction_j.data() + j * n_model);
-        if (norm_vector(direction_j) == 0.0){
-            throw std::runtime_error("Info: Supply nonzero direction for parameter " + names[j]);
-        }
-        std::vector<float> implemented(n), grad_plus, grad_minus, fd(n), diff(n);
+        std::vector<float> implemented(n);
+        std::vector<float> grad_plus(n);
+        std::vector<float> grad_minus(n);
+        std::vector<float> fd(n);
+        std::vector<float> diff(n);
         physical = model0;
         convertNormalizedAndPhysical(true, physical);
         uploadPhysicalModels(physical);
@@ -2404,16 +2390,22 @@ void Inversion::validateHessian(const std::vector<float>& direction, const float
         cudaMemcpy(implemented.data(), mgt->image, n_model * sizeof(float), cudaMemcpyDeviceToHost);
         cudaMemcpy(implemented.data() + n_model, eps_grad, n_model * sizeof(float), cudaMemcpyDeviceToHost);
         cudaMemcpy(implemented.data() + 2 * n_model, delta_grad, n_model * sizeof(float), cudaMemcpyDeviceToHost);
-        for (int k = 0; k < n; k++) implemented[k] *= -range[k / n_model];
+        for (int k = 0; k < n; k++){
+            implemented[k] *= -norm[k / n_model];
+        }
 
         models = model0;
-        for (int k = 0; k < n; k++) models[k] += h * direction_j[k];
+        for (int k = 0; k < n; k++){
+            models[k] += h * direction_j[k];
+        } 
         calculateMultiparameterGradient(true, true, grad_plus, models, false);
         models = model0;
-        for (int k = 0; k < n; k++) models[k] -= h * direction_j[k];
+        for (int k = 0; k < n; k++){
+            models[k] -= h * direction_j[k];
+        } 
         calculateMultiparameterGradient(true, true, grad_minus, models, false);
         for (int k = 0; k < n; k++){
-            fd[k] = float((double(grad_plus[k]) - double(grad_minus[k])) / (2.0 * double(h)));
+            fd[k] = (grad_plus[k] - grad_minus[k]) / (2.0 * h);
             diff[k] = implemented[k] - fd[k];
         }
         for (int i = 0; i < 3; i++){
@@ -2421,14 +2413,9 @@ void Inversion::validateHessian(const std::vector<float>& direction, const float
             saveModel(prefix + "_implemented.bin", implemented.data() + i * n_model);
             saveModel(prefix + "_fd.bin", fd.data() + i * n_model);
             saveModel(prefix + "_diff.bin", diff.data() + i * n_model);
-            const std::vector<float> a(implemented.begin() + i * n_model, implemented.begin() + (i + 1) * n_model);
-            const std::vector<float> d(diff.begin() + i * n_model, diff.begin() + (i + 1) * n_model);
-            const double norm = norm_vector(a);
-            std::cout << "HESSIAN response=" << names[i] << " input=" << names[j]
-                      << " relative_error=" << (norm > 0.0 ? norm_vector(d) / norm : norm_vector(d)) << std::endl;
         }
     }
-    validation_observed.clear();
+    
     models = model0;
     physical = model0;
     convertNormalizedAndPhysical(true, physical);

@@ -340,7 +340,7 @@ void Migration::setModel(){
 void Migration::saveCheckpoint(const int k){
     const int n_model_exp=pmt->nx_abc*pmt->nz_abc;
     
-    std::string checkpointFile=pmt->checkpointFolder+"checkpoint_double_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
+    std::string checkpointFile=pmt->checkpointFolder+"checkpoint_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
     std::ofstream file(checkpointFile,std::ios::binary);
     if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
 
@@ -352,7 +352,7 @@ void Migration::saveCheckpoint(const int k){
 
 void Migration::importCheckpoint(const int k, double* current, double* future){
     const int n_model_exp = pmt->nx_abc*pmt->nz_abc;
-    std::string checkpointFile = pmt->checkpointFolder+"checkpoint_double_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
+    std::string checkpointFile = pmt->checkpointFolder+"checkpoint_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
 
     std::ifstream file(checkpointFile,std::ios::binary);
     if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
@@ -586,24 +586,23 @@ __global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restr
             image[idx] += Uc[i] * P[i];
         }
         
-    }
-
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
-    }
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
+    }  
 
 }
 
@@ -764,23 +763,23 @@ __global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf, float* __re
             ilum[idx] += P[i] * P[i];
             image[idx] += Uc[i] * P[i];
         }
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
     }
 
 }
@@ -980,23 +979,23 @@ __global__ void updateAdjointWaveEquationTTI(float* __restrict__ Uf, float* __re
             ilum[idx] += P[i] * P[i];
             image[idx] += Uc[i] * P[i];
         }
-    }
 
-    if (ix < N_abc){
-        Uf[i] *= double(A[ix]);
-        Uc[i] *= double(A[ix]);
-    }
-    if (ix >=  nx - N_abc){
-        Uf[i] *= double(A[nx - 1 - ix]);
-        Uc[i] *= double(A[nx - 1 - ix]);
-    }
-    if (iz < N_abc){
-        Uf[i] *= double(A[iz]);
-        Uc[i] *= double(A[iz]);
-    }
-    if (iz >= nz - N_abc){
-        Uf[i] *= double(A[nz - 1 - iz]);
-        Uc[i] *= double(A[nz - 1 - iz]);
+        if (ix < N_abc){
+            Uf[i] *= double(A[ix]);
+            Uc[i] *= double(A[ix]);
+        }
+        if (ix >=  nx - N_abc){
+            Uf[i] *= double(A[nx - 1 - ix]);
+            Uc[i] *= double(A[nx - 1 - ix]);
+        }
+        if (iz < N_abc){
+            Uf[i] *= double(A[iz]);
+            Uc[i] *= double(A[iz]);
+        }
+        if (iz >= nz - N_abc){
+            Uf[i] *= double(A[nz - 1 - iz]);
+            Uc[i] *= double(A[nz - 1 - iz]);
+        }
     }
     
 }
