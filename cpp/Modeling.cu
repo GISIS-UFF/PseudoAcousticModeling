@@ -61,9 +61,9 @@ void Modeling::initializeFields()
         cudaMalloc((void**)&theta,n_model_exp * sizeof(float));
     }
 
-    cudaMalloc((void**)&current,n_model_exp * sizeof(float));
-    cudaMalloc((void**)&future,n_model_exp * sizeof(float));
-    cudaMalloc((void**)&seismogram,n_seis * sizeof(float));
+    cudaMalloc((void**)&current,n_model_exp * sizeof(double));
+    cudaMalloc((void**)&future,n_model_exp * sizeof(double));
+    cudaMalloc((void**)&seismogram,n_seis * sizeof(double));
 
     if (pmt->snap == true){
         cudaMallocHost((void**)&snapshot,n_model * sizeof(float));
@@ -116,9 +116,9 @@ void Modeling::createCerjanVector(){
 void Modeling::resetFields(){
     int n_model_exp = pmt->nx_abc * pmt->nz_abc;
     const int n_seis = pmt->Nrec * pmt->nt_data;
-    cudaMemset(current, 0, n_model_exp * sizeof(float));
-    cudaMemset(future, 0, n_model_exp * sizeof(float));
-    cudaMemset(seismogram, 0, n_seis * sizeof(float));
+    cudaMemset(current, 0, n_model_exp * sizeof(double));
+    cudaMemset(future, 0, n_model_exp * sizeof(double));
+    cudaMemset(seismogram, 0, n_seis * sizeof(double));
 }
 
 void Modeling::expandModel(const float* __restrict__ model, float* __restrict__ output){
@@ -390,37 +390,39 @@ void Modeling::saveSnapshot(const int shot,const int k){
 
 void Modeling::saveSeismogram(const int shot){
     std::ostringstream fcut_stream;
-    fcut_stream<<std::fixed<<std::setprecision(1)<<pmt->fcut;
-    std::string seismogramFile=pmt->seismogramFolder+"seismogram_shot_"+std::to_string(shot+1)+"_Nt"+std::to_string(pmt->nt_data)+"_Nrec"+std::to_string(pmt->Nrec)+"_fcut"+fcut_stream.str()+".bin";
+    fcut_stream << std::fixed << std::setprecision(1) << pmt->fcut;
 
-    const int n_seis = pmt->Nrec*pmt->nt_data;
-    float* seismogram_h = new float[n_seis];
+    std::string seismogramFile = pmt->seismogramFolder + "seismogram_shot_" + std::to_string(shot + 1) + "_Nt" + std::to_string(pmt->nt_data) + "_Nrec" + std::to_string(pmt->Nrec) + "_fcut" + fcut_stream.str() + ".bin";
 
-    cudaMemcpy(seismogram_h,seismogram,n_seis*sizeof(float),cudaMemcpyDeviceToHost);
+    const int n_seis = pmt->Nrec * pmt->nt_data;
+    double* seismogram_h = new double[n_seis];
 
-    std::ofstream file(seismogramFile,std::ios::binary);
+    cudaStreamSynchronize(compute_stream);
+    cudaMemcpy(seismogram_h, seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
+
+    std::ofstream file(seismogramFile, std::ios::binary);
     if(!file.is_open()){
         delete[] seismogram_h;
         throw std::invalid_argument("Info: Could not open file. Please verify the file path.");
     }
 
-    file.write((char*)seismogram_h,n_seis*sizeof(float));
+    file.write((char*)seismogram_h, n_seis * sizeof(double));
     file.close();
 
     delete[] seismogram_h;
 
-    std::cout<<"Info: File saved to " + seismogramFile<<std::endl;
+    std::cout << "Info: File saved to " + seismogramFile << std::endl;
 }
 
-void Modeling::forward_step(){
+void Modeling::forward_step(bool save_snapshot){
     if (pmt->approximation == "acoustic"){
-        updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc);
+        updateWaveEquation<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, A, pmt->N_abc, d_snapshot, save_snapshot);
     }
     else if (pmt->approximation == "VTI"){
-        updateWaveEquationVTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc);
+        updateWaveEquationVTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, A, pmt->N_abc, d_snapshot, save_snapshot);
     }
     else if (pmt->approximation == "TTI"){
-        updateWaveEquationTTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc);
+        updateWaveEquationTTI<<<expBlocks, nThreads, 0, compute_stream>>>(future, current, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, vp, epsilon, delta, theta, A, pmt->N_abc, d_snapshot, save_snapshot);
     }
 }
 
@@ -429,56 +431,50 @@ void Modeling::solveWaveEquation(){
     initializeFields();
     createWavelet();
     createCerjanVector();
-    setModel(); 
+    setModel();
     for (int shot = 0; shot < pmt->Nshot; shot++){
         std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
         sx = pmt->sx[shot];
         sz = pmt->sz[shot];
         resetFields();
+        int last_snapshot = -1;
         for (int k = 0; k < pmt->nt; k++){
-            forward_step();
-            injectSource <<<1, 1, 0, compute_stream>>>(future, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz, pmt->dt);
-            if(k>=pmt->itlag){
-                storeSeismogram<<<seisBlocks, nThreads, 0,compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
-            }
-            if (pmt->snap && k <= pmt->last_save && k % pmt->step == 0)
-            {
-                if (k >= pmt->step)
-                {
-                    cudaStreamSynchronize(copy_stream);
-                    saveSnapshot(shot, k - pmt->step);
-                }
-
-                cudaStreamSynchronize(compute_stream);
-
-                const float* current_interior = current + pmt->N_abc * pmt->nx_abc + pmt->N_abc;
-                cudaMemcpy2DAsync(d_snapshot, pmt->nx * sizeof(float), current_interior, pmt->nx_abc * sizeof(float), pmt->nx * sizeof(float), pmt->nz, cudaMemcpyDeviceToDevice, copy_stream);
+            bool save_snapshot = pmt->snap && k <= pmt->last_save && k % pmt->step == 0;
+            if (save_snapshot){
                 cudaStreamSynchronize(copy_stream);
-                cudaMemcpyAsync(snapshot,d_snapshot,pmt->nx * pmt->nz * sizeof(float),cudaMemcpyDeviceToHost,copy_stream);
+                if (last_snapshot >= 0) saveSnapshot(shot, last_snapshot);
+            }
+            forward_step(save_snapshot);
+            injectSource<<<1, 1, 0, compute_stream>>>(future, source, k, pmt->nt, pmt->nx_abc, sx, sz, pmt->dx, pmt->dz, pmt->dt);
+            if (k >= pmt->itlag){
+                storeSeismogram<<<seisBlocks, nThreads, 0, compute_stream>>>(current, seismogram, rx, rz, k, pmt->itlag, pmt->Nrec, pmt->nx_abc);
+            }
+            if (save_snapshot){
+                cudaStreamSynchronize(compute_stream);
+                cudaMemcpyAsync(snapshot, d_snapshot, pmt->nx * pmt->nz * sizeof(float), cudaMemcpyDeviceToHost, copy_stream);
+                last_snapshot = k;
             }
             std::swap(current, future);
         }
-        if (pmt->snap)
-        {
+        if (last_snapshot >= 0){
             cudaStreamSynchronize(copy_stream);
-            saveSnapshot(shot, pmt->last_save);
+            saveSnapshot(shot, last_snapshot);
         }
-
         cudaStreamSynchronize(compute_stream);
         saveSeismogram(shot);
         std::cout << "info: Wave equation solved" << std::endl;
     }
 }
 
-__global__ void injectSource(float* future, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz, const float dx, const float dz, const float dt){
+__global__ void injectSource(double* future, const float* source, int k, const int nt, const int nx_abc, const int sx, const int sz, const float dx, const float dz, const float dt){
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-    float inv_dxdz = 1.0f / (dx * dz);
+    double inv_dxdz = 1.0 / (double(dx) * double(dz));
     if ((index == 0) && (k < nt)){
-        future[sz * nx_abc + sx] += source[k]*inv_dxdz*dt*dt;
+        future[sz * nx_abc + sx] += double(source[k])*inv_dxdz*double(dt)*double(dt);
     }
 }
 
-__global__ void storeSeismogram(const float* current, float* seismogram, const int* rx, const int* rz, int k, int itlag, int Nrec, int nx_abc){
+__global__ void storeSeismogram(const double* current, double* seismogram, const int* rx, const int* rz, int k, int itlag, int Nrec, int nx_abc){
     int irec = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (irec >= Nrec){
@@ -489,15 +485,15 @@ __global__ void storeSeismogram(const float* current, float* seismogram, const i
     seismogram[it * Nrec + irec] = current[rz[irec] * nx_abc + rx[irec]];
 }
 
-__global__ void updateWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc){
-    const float c0 = -2.847222222222f;
-    const float c1 =  1.6f;
-    const float c2 = -0.2f;
-    const float c3 =  0.02539682539f;
-    const float c4 = -0.00178571428f;
-    const float inv_dx2 = 1.0f / (dx * dx);
-    const float inv_dz2 = 1.0f / (dz * dz);
-    const float dt2 = dt * dt;
+__global__ void updateWaveEquation(double* __restrict__ Uf, const double* __restrict__ Uc,const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+    const double c0 = -2.847222222222;
+    const double c1 =  1.6;
+    const double c2 = -0.2;
+    const double c3 =  0.02539682539;
+    const double c4 = -0.00178571428;
+    const double inv_dx2 = 1.0 / (double(dx) * double(dx));
+    const double inv_dz2 = 1.0 / (double(dz) * double(dz));
+    const double dt2 = double(dt) * double(dt);
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int total_size = nz * nx;
@@ -509,56 +505,62 @@ __global__ void updateWaveEquation(float* __restrict__ Uf, float* __restrict__ U
 
     if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4) 
     {
-        const float vp2 = vp[i]*vp[i];
+        const double vp2 = double(vp[i])*double(vp[i]);
 
-        float pxx = (c0 * Uc[i]
+        double pxx = (c0 * Uc[i]
             + c1 * (Uc[i + 1] + Uc[i - 1])
             + c2 * (Uc[i + 2] + Uc[i - 2])
             + c3 * (Uc[i + 3] + Uc[i - 3])
             + c4 * (Uc[i + 4] + Uc[i - 4])) * inv_dx2;
 
-        float pzz = (c0 * Uc[i]
+        double pzz = (c0 * Uc[i]
             + c1 * (Uc[i + nx] + Uc[i - nx])
             + c2 * (Uc[i + 2*nx] + Uc[i - 2*nx])
             + c3 * (Uc[i + 3*nx] + Uc[i - 3*nx])
             + c4 * (Uc[i + 4*nx] + Uc[i - 4*nx])) * inv_dz2;
 
-        Uf[i] = vp2 * dt2 * (pxx + pzz) + 2.0f * Uc[i] - Uf[i];
+        Uf[i] = vp2 * dt2 * (pxx + pzz) + 2.0 * Uc[i] - Uf[i];
+    }
 
-        if (ix < N_abc){
-            Uf[i] *= A[ix];
-            Uc[i] *= A[ix];
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= A[nx - 1 - ix];
-            Uc[i] *= A[nx - 1 - ix];
-        }
-        if (iz < N_abc){
-            Uf[i] *= A[iz];
-            Uc[i] *= A[iz];
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= A[nz - 1 - iz];
-            Uc[i] *= A[nz - 1 - iz];
-        }
+    if (ix < N_abc){
+        Uf[i] *= double(A[ix]);
+        Uc[i] *= double(A[ix]);
+    }
+    if (ix >=  nx - N_abc){
+        Uf[i] *= double(A[nx - 1 - ix]);
+        Uc[i] *= double(A[nx - 1 - ix]);
+    }
+    if (iz < N_abc){
+        Uf[i] *= double(A[iz]);
+        Uc[i] *= double(A[iz]);
+    }
+    if (iz >= nz - N_abc){
+        Uf[i] *= double(A[nz - 1 - iz]);
+        Uc[i] *= double(A[nz - 1 - iz]);
+    }
+
+    if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&
+        iz >= N_abc && iz < nz - N_abc){
+        int idx = (iz - N_abc) * (nx - 2 * N_abc) + ix - N_abc;
+        snapshot[idx] = float(Uc[i]);
     }
 }
 
-__global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc){
-    const float c0 = -2.847222222222f;
-    const float c1 =  1.6f;
-    const float c2 = -0.2f;
-    const float c3 =  0.02539682539f;
-    const float c4 = -0.00178571428f;
-    const float a1 =  0.8f;
-    const float a2 = -0.2f;
-    const float a3 =  0.03809523809f;
-    const float a4 = -0.00357142857f;
-    const float inv_dx = 1.0f / dx;
-    const float inv_dz = 1.0f / dz;
-    const float inv_dx2 = 1.0f / (dx * dx);
-    const float inv_dz2 = 1.0f / (dz * dz);
-    const float dt2 = dt * dt;
+__global__ void updateWaveEquationVTI(double* __restrict__ Uf, const double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+    const double c0 = -2.847222222222;
+    const double c1 =  1.6;
+    const double c2 = -0.2;
+    const double c3 =  0.02539682539;
+    const double c4 = -0.00178571428;
+    const double a1 =  0.8;
+    const double a2 = -0.2;
+    const double a3 =  0.03809523809;
+    const double a4 = -0.00357142857;
+    const double inv_dx = 1.0 / dx;
+    const double inv_dz = 1.0 / dz;
+    const double inv_dx2 = 1.0 / (double(dx) * double(dx));
+    const double inv_dz2 = 1.0 / (double(dz) * double(dz));
+    const double dt2 = double(dt) * double(dt);
 
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -571,81 +573,87 @@ __global__ void updateWaveEquationVTI(float* __restrict__ Uf, float* __restrict_
 
     if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4) 
     {
-        const float vp2 = vp[i]*vp[i];
+        const double vp2 = double(vp[i])*double(vp[i]);
 
-        float pxx = (c0 * Uc[i]
+        double pxx = (c0 * Uc[i]
                     + c1 * (Uc[i + 1] + Uc[i - 1])
                     + c2 * (Uc[i + 2] + Uc[i - 2])
                     + c3 * (Uc[i + 3] + Uc[i - 3])
                     + c4 * (Uc[i + 4] + Uc[i - 4])) * inv_dx2;
 
-        float pzz = (c0 * Uc[i]
+        double pzz = (c0 * Uc[i]
                     + c1 * (Uc[i + nx] + Uc[i - nx])
                     + c2 * (Uc[i + 2*nx] + Uc[i - 2*nx])
                     + c3 * (Uc[i + 3*nx] + Uc[i - 3*nx])
                     + c4 * (Uc[i + 4*nx] + Uc[i - 4*nx])) * inv_dz2;
 
-        float px = (a1*(Uc[i+1] - Uc[i-1]) +
+        double px = (a1*(Uc[i+1] - Uc[i-1]) +
                     a2*(Uc[i+2] - Uc[i-2]) +
                     a3*(Uc[i+3] - Uc[i-3]) +
                     a4*(Uc[i+4] - Uc[i-4])) * inv_dx;
 
-        float pz = (a1 * (Uc[i + nx] - Uc[i - nx]) +
+        double pz = (a1 * (Uc[i + nx] - Uc[i - nx]) +
                     a2 * (Uc[i + 2*nx] - Uc[i - 2*nx]) +
                     a3 * (Uc[i + 3*nx] - Uc[i - 3*nx]) +
                     a4 * (Uc[i + 4*nx] - Uc[i - 4*nx])) * inv_dz;
         
-        const float eps = epsilon[i];
-        const float del = delta[i];
+        const double eps = epsilon[i];
+        const double del = delta[i]; 
 
-        const float px2 = px * px;
-        const float pz2 = pz * pz;
+        const double px2 = px * px;
+        const double pz2 = pz * pz;
 
-        const float px4 = px2 * px2;
-        const float pz4 = pz2 * pz2;
-        const float px2pz2 = px2 * pz2;
+        const double px4 = px2 * px2;
+        const double pz4 = pz2 * pz2;
+        const double px2pz2 = px2 * pz2;
 
-        const float num = -2.0f * (eps - del) * px2pz2;
-        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2pz2;
-        const float Sd = num / (den + 1e-37f);  
+        const double num = -2.0 * (eps - del) * px2pz2;
+        const double den = (1.0 + 2.0 * eps) * px4 + pz4 + 2.0 * (1.0 + del) * px2pz2;
+        const double Sd = num / (den + 1e-37);  
 
-        Uf[i] = 2.0f * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0f+ 2.0f*eps) + Sd) * pxx + vp2 * dt2 *(1.0f + Sd) * pzz;
+        Uf[i] = 2.0 * Uc[i] - Uf[i] + vp2 * dt2 * ((1.0+ 2.0*eps) + Sd) * pxx + vp2 * dt2 *(1.0 + Sd) * pzz;
+    }
 
-        if (ix < N_abc){
-            Uf[i] *= A[ix];
-            Uc[i] *= A[ix];
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= A[nx - 1 - ix];
-            Uc[i] *= A[nx - 1 - ix];
-        }
-        if (iz < N_abc){
-            Uf[i] *= A[iz];
-            Uc[i] *= A[iz];
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= A[nz - 1 - iz];
-            Uc[i] *= A[nz - 1 - iz];
-        }
+    if (ix < N_abc){
+        Uf[i] *= double(A[ix]);
+        Uc[i] *= double(A[ix]);
+    }
+    if (ix >=  nx - N_abc){
+        Uf[i] *= double(A[nx - 1 - ix]);
+        Uc[i] *= double(A[nx - 1 - ix]);
+    }
+    if (iz < N_abc){
+        Uf[i] *= double(A[iz]);
+        Uc[i] *= double(A[iz]);
+    }
+    if (iz >= nz - N_abc){
+        Uf[i] *= double(A[nz - 1 - iz]);
+        Uc[i] *= double(A[nz - 1 - iz]);
+    }
+
+    if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&
+        iz >= N_abc && iz < nz - N_abc){
+        int idx = (iz - N_abc) * (nx - 2 * N_abc) + ix - N_abc;
+        snapshot[idx] = float(Uc[i]);
     }
 }
 
-__global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta, float* __restrict__ A, int N_abc){
-    const float c0 = -2.847222222222f;
-    const float c1 =  1.6f;
-    const float c2 = -0.2f;
-    const float c3 =  0.02539682539f;
-    const float c4 = -0.00178571428f;
-    const float a1 =  0.8f;
-    const float a2 = -0.2f;
-    const float a3 =  0.03809523809f;
-    const float a4 = -0.00357142857f;
-    const float inv_dx = 1.0f / dx;
-    const float inv_dz = 1.0f / dz;
-    const float inv_dx2 = 1.0f / (dx * dx);
-    const float inv_dz2 = 1.0f / (dz * dz);
-    const float inv_dxdz = 1.0f / (dx * dz);
-    const float dt2 = dt * dt;
+__global__ void updateWaveEquationTTI(double* __restrict__ Uf, const double* __restrict__ Uc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp,const float* __restrict__ epsilon,const float* __restrict__ delta,const float* __restrict__ theta, float* __restrict__ A, int N_abc, float* snapshot, bool save_snapshot){
+    const double c0 = -2.847222222222;
+    const double c1 =  1.6;
+    const double c2 = -0.2;
+    const double c3 =  0.02539682539;
+    const double c4 = -0.00178571428;
+    const double a1 =  0.8;
+    const double a2 = -0.2;
+    const double a3 =  0.03809523809;
+    const double a4 = -0.00357142857;
+    const double inv_dx = 1.0 / dx;
+    const double inv_dz = 1.0 / dz;
+    const double inv_dx2 = 1.0 / (double(dx) * double(dx));
+    const double inv_dz2 = 1.0 / (double(dz) * double(dz));
+    const double inv_dxdz = 1.0 / (double(dx) * double(dz));
+    const double dt2 = double(dt) * double(dt);
 
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int total_size = nz * nx;
@@ -657,21 +665,21 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
 
     if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
     {
-        const float vp2 = vp[i]*vp[i];
+        const double vp2 = double(vp[i])*double(vp[i]);
 
-        float pxx = (c0 * Uc[i]
+        double pxx = (c0 * Uc[i]
                    + c1 * (Uc[i + 1] + Uc[i - 1])
                    + c2 * (Uc[i + 2] + Uc[i - 2])
                    + c3 * (Uc[i + 3] + Uc[i - 3])
                    + c4 * (Uc[i + 4] + Uc[i - 4])) * inv_dx2;
 
-        float pzz = (c0 * Uc[i]
+        double pzz = (c0 * Uc[i]
                    + c1 * (Uc[i + nx]     + Uc[i - nx])
                    + c2 * (Uc[i + 2*nx] + Uc[i - 2*nx])
                    + c3 * (Uc[i + 3*nx] + Uc[i - 3*nx])
                    + c4 * (Uc[i + 4*nx] + Uc[i - 4*nx])) * inv_dz2;
 
-        float pxz = (
+        double pxz = (
             a1*a1*(Uc[i + nx + 1]     - Uc[i - nx + 1]     + Uc[i - nx - 1]     - Uc[i + nx - 1]) +
             a1*a2*(Uc[i + 2*nx + 1]   - Uc[i - 2*nx + 1]   + Uc[i - 2*nx - 1]   - Uc[i + 2*nx - 1]) +
             a1*a3*(Uc[i + 3*nx + 1]   - Uc[i - 3*nx + 1]   + Uc[i - 3*nx - 1]   - Uc[i + 3*nx - 1]) +
@@ -692,54 +700,61 @@ __global__ void updateWaveEquationTTI(float* __restrict__ Uf, float* __restrict_
             a4*a3*(Uc[i + 3*nx + 4]   - Uc[i - 3*nx + 4]   + Uc[i - 3*nx - 4]   - Uc[i + 3*nx - 4]) +
             a4*a4*(Uc[i + 4*nx + 4]   - Uc[i - 4*nx + 4]   + Uc[i - 4*nx - 4]   - Uc[i + 4*nx - 4])) * inv_dxdz;
 
-        float px = (a1 * (Uc[i + 1] - Uc[i - 1]) +
+        double px = (a1 * (Uc[i + 1] - Uc[i - 1]) +
                     a2 * (Uc[i + 2] - Uc[i - 2]) +
                     a3 * (Uc[i + 3] - Uc[i - 3]) +
                     a4 * (Uc[i + 4] - Uc[i - 4])) * inv_dx;
 
-        float pz = (a1 * (Uc[i + nx]     - Uc[i - nx]) +
+        double pz = (a1 * (Uc[i + nx]     - Uc[i - nx]) +
                     a2 * (Uc[i + 2 * nx] - Uc[i - 2 * nx]) +
                     a3 * (Uc[i + 3 * nx] - Uc[i - 3 * nx]) +
                     a4 * (Uc[i + 4 * nx] - Uc[i - 4 * nx])) * inv_dz;
 
-        const float eps = epsilon[i];
-        const float del = delta[i];
-        const float th = theta[i];
+        const double eps = epsilon[i];
+        const double del = delta[i];
+        const double th = theta[i];
 
-        const float c = cosf(th);
-        const float s = sinf(th);
+        const double c = cos(th);
+        const double s = sin(th);
 
-        const float px_rot = px*c - pz*s;
-        const float pz_rot = px*s + pz*c;
+        const double px_rot = px*c - pz*s;
+        const double pz_rot = px*s + pz*c;
 
-        const float px_rot2 = px_rot*px_rot;
-        const float pz_rot2 = pz_rot*pz_rot;
+        const double px_rot2 = px_rot*px_rot;
+        const double pz_rot2 = pz_rot*pz_rot;
 
-        const float c2 = c*c;
-        const float s2 = s*s;
-        const float sin2th = 2.0f*s*c;
+        const double cos2 = c*c;
+        const double s2 = s*s;
+        const double sin2th = 2.0*s*c;
 
-        const float num = -2.0f*(eps - del)*px_rot2*pz_rot2;
-        const float den = (1.0f + 2.0f*eps)*px_rot2*px_rot2 + pz_rot2*pz_rot2 + 2.0f*(1.0f + del)*px_rot2*pz_rot2;
-        const float Sd = num / (den + 1e-37f);
+        const double num = -2.0*(eps - del)*px_rot2*pz_rot2;
+        const double den = (1.0 + 2.0*eps)*px_rot2*px_rot2 + pz_rot2*pz_rot2 + 2.0*(1.0 + del)*px_rot2*pz_rot2;
+        const double Sd = num / (den + 1e-37);
 
-        Uf[i] = 2.0f*Uc[i] - Uf[i] + vp2*dt2*((1.0f + 2.0f*eps)*c2 + s2 + Sd)*pxx + vp2*dt2*((1.0f + 2.0f*eps)*s2 + c2 + Sd)*pzz - 2.0f*eps*vp2*dt2*sin2th*pxz;
-        
-        if (ix < N_abc){
-            Uf[i] *= A[ix];
-            Uc[i] *= A[ix];
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= A[nx - 1 - ix];
-            Uc[i] *= A[nx - 1 - ix];
-        }
-        if (iz < N_abc){
-            Uf[i] *= A[iz];
-            Uc[i] *= A[iz];
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= A[nz - 1 - iz];
-            Uc[i] *= A[nz - 1 - iz];
-        }
+        Uf[i] = 2.0*Uc[i] - Uf[i] + vp2*dt2*((1.0 + 2.0*eps)*cos2 + s2 + Sd)*pxx + vp2*dt2*((1.0 + 2.0*eps)*s2 + cos2 + Sd)*pzz - 2.0*eps*vp2*dt2*sin2th*pxz;
+    }
+
+    if (ix < N_abc){
+        Uf[i] *= double(A[ix]);
+        Uc[i] *= double(A[ix]);
+    }
+    if (ix >=  nx - N_abc){
+        Uf[i] *= double(A[nx - 1 - ix]);
+        Uc[i] *= double(A[nx - 1 - ix]);
+    }
+    if (iz < N_abc){
+        Uf[i] *= double(A[iz]);
+        Uc[i] *= double(A[iz]);
+    }
+    if (iz >= nz - N_abc){
+        Uf[i] *= double(A[nz - 1 - iz]);
+        Uc[i] *= double(A[nz - 1 - iz]);
+    }
+    
+    if (save_snapshot && ix >= N_abc && ix < nx - N_abc &&
+        iz >= N_abc && iz < nz - N_abc){
+        int idx = (iz - N_abc) * (nx - 2 * N_abc) + ix - N_abc;
+        snapshot[idx] = float(Uc[i]);
     }
 }
+

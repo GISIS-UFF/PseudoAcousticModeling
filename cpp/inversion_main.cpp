@@ -31,7 +31,7 @@ auto ti = std::chrono::system_clock::now();
     const int n_model = pmt.nx * pmt.nz;
 
     const std::string background_files[3] = {"../inputs/models/layer2vp_Nz31_Nx31.bin", "../inputs/models/layer2epsilon_Nz31_Nx31.bin", "../inputs/models/layer2delta_Nz31_Nx31.bin"};
-    const std::string diffractor_files[3] = {"../inputs/models/diffractorvp_Nz31_Nx31.bin", "../inputs/models/layer2epsilon_Nz31_Nx31.bin", "../inputs/models/layer2delta_Nz31_Nx31.bin"};
+    const std::string diffractor_files[3] = {"../inputs/models/diffractorvp_Nz31_Nx31.bin", "../inputs/models/diffractorepsilon_Nz31_Nx31.bin", "../inputs/models/diffractordelta_Nz31_Nx31.bin"};
 
     inv.models.resize(3 * n_model);
 
@@ -59,8 +59,8 @@ auto ti = std::chrono::system_clock::now();
 
     }
 
-    inv.validategradient(0.1f);
-    inv.validateborn(direction, 0.1f);
+    // inv.validategradient(0.00125f);
+    // inv.validateborn(direction, 0.1f);
     inv.validateHessian(direction, 0.1f);
 
     inv.freeMemory();
