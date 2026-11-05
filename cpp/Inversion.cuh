@@ -47,7 +47,6 @@ public:
 
     std::vector<std::vector<float>> s_s2_store, y_s2_store;
     std::vector<float> grads, models, Q, p, x, Hx, dm;
-    std::vector<double> validation_observed;
     double beta1 = 0.0;
     double beta2 = 0.0;
     double beta2_new = 0.0;
@@ -88,9 +87,6 @@ public:
     void solveGaussNewton(std::vector<float> &g, const float nk, const float grad_norm, const bool update_eps, const bool update_delta);
     void convertNormalizedAndPhysical(const bool to_physical, std::vector<float> &models);
     void solveFullWaveformInversionMultiparameterHierarchical();
-    void validategradient(const float h);
-    void validateborn(const std::vector<float>& direction,const float h);
-    void validateHessian(const std::vector<float>& direction,const float h);
 };
 
 __global__ void computeObjectiveFunction(double *X, double* residual, const double* calculated, int nt, int Nrec);

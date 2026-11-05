@@ -4,14 +4,24 @@ from survey import parameters
 pmt = parameters("../inputs/Parameters.json")
 plt = plotting(pmt)
 
-# plt.viewModel(f"../inputs/models/layer2vp_Nz31_Nx31.bin")
+plt.viewModel(f"../outputs/estimated_models/fwi_vp_VTI_Nx601_Nz301_itr1_freq10.0.bin")
+plt.viewModel(f"../outputs/estimated_models/fwi_epsilon_VTI_Nx601_Nz301_itr1_freq10.0.bin")
+plt.viewModel(f"../outputs/estimated_models/fwi_delta_VTI_Nx601_Nz301_itr1_freq10.0.bin")
 
 # plt.viewHistory()
 # plt.viewSnapshot("VTIforward_shot_1_Nx301_Nz301_Nt4001_frame_600.bin","/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin")
 # plt.movieSnapshot(f"VTIforward_shot_15_Nx301_Nz301_Nt4178_frame", f"/home/juanmarques/workspace/PseudoAcousticModeling/inputs/models/diffractorvp_Nz301_Nx301.bin",backward=False,interval=100,savegif=False)
 # plt.viewSeismogram(f"../outputs/seismograms/seismogram_shot_1_Nt451_Nrec120_fcut10.0.bin", perc=99)
 # plt.viewSeismogramComparison(95,0,"../outputs/seismograms/VTIseismogram_shot_1_Nt20001_Nrec501.bin", "../outputs/seismograms/VTINewseismogram_shot_1_Nt20001_Nrec501.bin")
-# plt.viewImage(f"../outputs/images/image_VTI_Nx31_Nz31.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/s2_dm_fwi_iter_1_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/epsilon_dm_fwi_iter_1_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/delta_dm_fwi_iter_1_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/s2_gradient_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/epsilon_gradient_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/delta_gradient_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/s2_pseudohessian_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/epsilon_pseudohessian_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
+plt.viewImage(f"../outputs/gradients/delta_pseudohessian_fwi_iter_2_VTI_Nx601_Nz301_freq10.0.bin",laplacian=False,perc=100)
 # plt.plotImageTrace(f"{pmt.migratedimageFolder}migrated_image_{pmt.approximation}_Nx{pmt.nx}_Nz{pmt.nz}.bin", f"../inputs/layer2vp_Nz{pmt.nz}_Nx{pmt.nx}.bin", laplacian = True, ix=None, perc=99)
 # plt.movieSnapshot(f"VTIbackward_shot_10_Nx301_Nz301_Nt5178_frame", f"/home/processamento/PseudoAcousticModeling/inputs/models/layer2vp_Nz301_Nx301.bin",backward=True,interval=200,savegif=True)
 
@@ -31,38 +41,4 @@ plt = plotting(pmt)
 # plt.legend()
 # plt.show()
 
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-def comparar(prefixo, shape, dtype=np.float32, *, born=False):
-    impl = np.fromfile(f"{prefixo}_implemented.bin", dtype=dtype)
-    fd = np.fromfile(f"{prefixo}_fd.bin", dtype=dtype)
-    impl = impl.reshape(shape).astype(np.float64)
-    fd = fd.reshape(shape).astype(np.float64)
-    diff = impl - fd
-
-    limite = max(np.abs(impl).max(), np.abs(fd).max())
-    limite_diff = np.abs(diff).max()
-
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
-    fig.suptitle(prefixo.rsplit("/", 1)[-1])
-
-    for ax, dados, titulo, escala in zip( axes, (impl, fd, diff), ("Implementado", "FD", "Implementado − FD"), (limite, limite, limite_diff),):
-        im = ax.imshow(dados, cmap="gray", interpolation="nearest", vmin=-escala, vmax=escala, aspect="auto" if born else "equal",)
-        ax.set_title(titulo)
-        ax.set_xlabel("Receptor" if born else "ix")
-        ax.set_ylabel("Amostra de tempo" if born else "iz")
-        fig.colorbar(im, ax=ax)
-
-    plt.show()
-
-pasta = "../outputs/gradients"
-malha = (pmt.nz, pmt.nx)
-
-comparar(f"{pasta}/gradient_s2", malha)
-
-# # comparar(f"{pasta}/born", (-1, plt.pmt.Nrec), np.float64, born=True)
-
-# comparar(f"{pasta}/hessian_delta_s2", malha)
 

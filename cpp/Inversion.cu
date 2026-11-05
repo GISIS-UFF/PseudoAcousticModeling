@@ -158,11 +158,6 @@ double Inversion::ObjectiveFunction() {
 void Inversion::readObsSeismogram(const int shot, double *obs_h) {
     int n_seis = pmt->nt_data * pmt->Nrec;
 
-    if (!validation_observed.empty()){
-        std::copy_n(validation_observed.data(), n_seis, obs_h);
-        return;
-    }
-
     std::ostringstream fcut_stream;
     fcut_stream << std::fixed << std::setprecision(1) << pmt->fcut;
     std::string seismogramFile = pmt->seismogramFolder + "seismogram_shot_" + std::to_string(shot + 1) + "_Nt" + std::to_string(pmt->nt_data) + "_Nrec" + std::to_string(pmt->Nrec) + "_fcut" + fcut_stream.str() + ".bin";
@@ -1315,10 +1310,10 @@ void Inversion::solveGaussNewton(std::vector<float> &g, const float nk, const fl
             const int j = i / n_model;
             const int k = i % n_model;
 
-            if (!active[j] || water_mask[k]) {
-                Hx[i] = 0.0f;
-                continue;
-            }
+            // if (!active[j] || water_mask[k]) {
+            //     Hx[i] = 0.0f;
+            //     continue;
+            // }
             Hx[i] = -Hx[i];
 
             if (j == 0) {
@@ -2259,165 +2254,4 @@ __global__ void updateWaveEquationVTIBornTGN(double *__restrict__ dUf, double *_
             dUc[i] *= A[nz - 1 - iz];
         }
     }
-}
-
-void Inversion::validategradient(const float h){
-    const int n_model = pmt->nx * pmt->nz;
-    const std::vector<float> model0 = models;
-    std::vector<float> implemented;
-    std::vector<float> fd(3 * n_model, 0.0f);
-    std::vector<float> diff(3 * n_model, 0.0f);
-
-    std::vector<float> background_physical = model0;
-    convertNormalizedAndPhysical(true, background_physical);
-    uploadPhysicalModels(background_physical);
-
-    calculateMultiparameterGradient(true, true, implemented, models, false);
-    for (int j = 0; j < 3; j++){
-        for (int i = 0; i < n_model; i++){
-            const int k = j * n_model + i;
-            std::vector<float> physical = model0;
-            physical[k] += h;
-            convertNormalizedAndPhysical(true, physical);
-            uploadPhysicalModels(physical);
-            const double X_plus = ObjectiveFunction();
-
-            physical = model0;
-            physical[k] -= h;
-            convertNormalizedAndPhysical(true, physical);
-            uploadPhysicalModels(physical);
-            const double X_minus = ObjectiveFunction();
-            fd[k] = float((X_plus - X_minus) / (2.0 * double(h)));
-        }
-    }
-    for (int k = 0; k < 3 * n_model; k++){
-        diff[k] = implemented[k] - fd[k];
-    }
-    const std::string names[3] = {"s2", "epsilon", "delta"};
-    for (int j = 0; j < 3; j++){
-        const std::string prefix = pmt->gradientsFolder + "gradient_" + names[j];
-        saveModel(prefix + "_implemented.bin", implemented.data() + j * n_model);
-        saveModel(prefix + "_fd.bin", fd.data() + j * n_model);
-        saveModel(prefix + "_diff.bin", diff.data() + j * n_model);
-    }
-    models = model0;
-    std::vector<float> physical = model0;
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-}
-
-void Inversion::validateborn(const std::vector<float>& direction, const float h){
-    const int n_model = pmt->nx * pmt->nz;
-    const int n_seis = pmt->Nrec * pmt->nt_data;
-
-    const std::vector<float> model0 = models;
-    std::vector<double> implemented(n_seis);
-    std::vector<double> data_plus(n_seis);
-    std::vector<double> data_minus(n_seis);
-    std::vector<double> fd(n_seis); 
-    std::vector<double> diff(n_seis);
-    std::vector<float> physical = model0;
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-    setBornPerturbation(direction);
-    computeHessianVectorProduct();
-    cudaMemcpy(implemented.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
-
-    physical = model0;
-    for (int k = 0; k < 3 * n_model; k++){
-        physical[k] += h * direction[k];
-    }
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-    ObjectiveFunction();
-    cudaMemcpy(data_plus.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
-
-    physical = model0;
-    for (int k = 0; k < 3 * n_model; k++){
-        physical[k] -= h * direction[k];
-    }
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-    ObjectiveFunction();
-    cudaMemcpy(data_minus.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
-    for (int i = 0; i < n_seis; i++){
-        fd[i] = (data_plus[i] - data_minus[i]) / (2.0 * double(h));
-        diff[i] = implemented[i] - fd[i];
-    }
-    const std::string names[3] = {"born_implemented.bin", "born_fd.bin", "born_diff.bin"};
-    const double* data[3] = {implemented.data(), fd.data(), diff.data()};
-    for (int j = 0; j < 3; j++){
-        std::ofstream file(pmt->gradientsFolder + names[j], std::ios::binary);
-        file.write((const char*)data[j], n_seis * sizeof(double));
-    }
-    models = model0;
-    physical = model0;
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-}
-
-void Inversion::validateHessian(const std::vector<float>& direction, const float h){
-    const int n_model = pmt->nx * pmt->nz;
-    const int n = 3 * n_model;
-    const int n_seis = pmt->Nrec * pmt->nt_data;
-    const std::vector<float> model0 = models;
-    const std::string names[3] = {"s2", "epsilon", "delta"};
-    const float s2_min = 1.0f / (pmt->vmax * pmt->vmax);
-    const float s2_max = 1.0f / (pmt->vmin * pmt->vmin);
-    const float norm[3] = {s2_max - s2_min, pmt->epsmax - pmt->epsmin, pmt->deltamax - pmt->deltamin};
-
-    std::vector<float> physical = model0;
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
-    ObjectiveFunction();
-    validation_observed.resize(n_seis);
-    cudaMemcpy(validation_observed.data(), mdl->seismogram, n_seis * sizeof(double), cudaMemcpyDeviceToHost);
-
-    validation_observed.clear();
-    for (int j = 0; j < 3; j++){
-        std::vector<float> direction_j(n, 0.0f);
-        std::copy_n(direction.data() + j * n_model, n_model, direction_j.data() + j * n_model);
-        std::vector<float> implemented(n);
-        std::vector<float> grad_plus(n);
-        std::vector<float> grad_minus(n);
-        std::vector<float> fd(n);
-        std::vector<float> diff(n);
-        physical = model0;
-        convertNormalizedAndPhysical(true, physical);
-        uploadPhysicalModels(physical);
-        setBornPerturbation(direction_j);
-        computeHessianVectorProduct();
-        cudaMemcpy(implemented.data(), mgt->image, n_model * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(implemented.data() + n_model, eps_grad, n_model * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(implemented.data() + 2 * n_model, delta_grad, n_model * sizeof(float), cudaMemcpyDeviceToHost);
-        for (int k = 0; k < n; k++){
-            implemented[k] *= -norm[k / n_model];
-        }
-
-        models = model0;
-        for (int k = 0; k < n; k++){
-            models[k] += h * direction_j[k];
-        } 
-        calculateMultiparameterGradient(true, true, grad_plus, models, false);
-        models = model0;
-        for (int k = 0; k < n; k++){
-            models[k] -= h * direction_j[k];
-        } 
-        calculateMultiparameterGradient(true, true, grad_minus, models, false);
-        for (int k = 0; k < n; k++){
-            fd[k] = (grad_plus[k] - grad_minus[k]) / (2.0 * h);
-            diff[k] = implemented[k] - fd[k];
-        }
-        for (int i = 0; i < 3; i++){
-            const std::string prefix = pmt->gradientsFolder + "hessian_" + names[i] + "_" + names[j];
-            saveModel(prefix + "_implemented.bin", implemented.data() + i * n_model);
-            saveModel(prefix + "_fd.bin", fd.data() + i * n_model);
-            saveModel(prefix + "_diff.bin", diff.data() + i * n_model);
-        }
-    }
-    
-    models = model0;
-    physical = model0;
-    convertNormalizedAndPhysical(true, physical);
-    uploadPhysicalModels(physical);
 }
