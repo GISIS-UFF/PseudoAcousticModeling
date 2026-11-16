@@ -1,8 +1,8 @@
 #include "Migration.cuh"
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <stdexcept>
+#include <future>
+#include <chrono>
 
 Migration::Migration(Survey* parameters, Modeling* modeling)
 {
@@ -27,15 +27,16 @@ void Migration::initializeMigrationFields()
     cudaMalloc((void**)&futurebck, n_model_exp * sizeof(float));
     
     if (pmt->migration == "onthefly"){
-        cudaMalloc((void**)&savefield,pmt->nt*n_model_exp*sizeof(double));
+        cudaMalloc((void**)&savefield,pmt->nt*n_model_exp*sizeof(float));
     }
     if (pmt->migration == "checkpoint"){
-        cudaMalloc((void**)&d_current, n_model_exp * sizeof(double));
-        cudaMallocHost((void**)&h_current,n_model_exp*sizeof(double));
-        cudaMallocHost((void**)&h_current_next ,n_model_exp*sizeof(double));
-        cudaMallocHost((void**)&h_future_next,n_model_exp*sizeof(double));
-        cudaMallocHost((void**)&h_future,n_model_exp*sizeof(double));
-        cudaMalloc((void**)&d_future, n_model_exp * sizeof(double));
+        cudaMallocHost((void**)&savefield, pmt->step * n_model_exp * sizeof(float));
+        cudaMalloc((void**)&d_current, n_model_exp * sizeof(float));
+        cudaMallocHost((void**)&h_current,n_model_exp*sizeof(float));
+        cudaMallocHost((void**)&h_current_next ,n_model_exp*sizeof(float));
+        cudaMallocHost((void**)&h_future_next,n_model_exp*sizeof(float));
+        cudaMallocHost((void**)&h_future,n_model_exp*sizeof(float));
+        cudaMalloc((void**)&d_future, n_model_exp * sizeof(float));
     }
 
     if (pmt->approximation == "VTI" || pmt->approximation == "TTI"){
@@ -55,6 +56,7 @@ void Migration::freeMemory(){
     cudaFree(currentbck);
     cudaFree(futurebck);
     if (pmt->migration == "checkpoint"){
+        cudaFreeHost(savefield_h);
         cudaFree(d_current);
         cudaFreeHost(h_current);
         cudaFreeHost(h_current_next);
@@ -82,7 +84,7 @@ void Migration::resetFields(){
     cudaMemset(futurebck, 0, n_model_exp * sizeof(float));
 }
 
-void Migration::Mute(double* seismogram, const int shot)
+void Migration::Mute(float* seismogram, const int shot)
 {   
     for (int irec = 0; irec < pmt->Nrec; irec++)
     {
@@ -114,20 +116,15 @@ void Migration::Mute(double* seismogram, const int shot)
 
 void Migration::loadSeismogram(const int shot){
     int n_seis = pmt->nt_data * pmt->Nrec;
-    double* seismogram_h = new double[n_seis];
+    float* seismogram_h = new float[n_seis];
 
     std::ostringstream fcut_stream;
     fcut_stream<<std::fixed<<std::setprecision(1)<<pmt->fcut;
     std::string seismogramFile = pmt->seismogramFolder+"seismogram_shot_"+std::to_string(shot+1)+"_Nt"+std::to_string(pmt->nt_data)+"_Nrec"+std::to_string(pmt->Nrec)+"_fcut"+fcut_stream.str()+".bin";
-    std::ifstream file(seismogramFile, std::ios::binary);
-    if (!file.read((char*)seismogram_h, n_seis * sizeof(double))){
-        delete[] seismogram_h;
-        throw std::runtime_error("Info: Could not read double seismogram: " + seismogramFile);
-    }
-    file.close();
+    mdl->importBin(seismogramFile, seismogram_h, n_seis);
     Mute(seismogram_h, shot);
     
-    cudaMemcpy(mdl->seismogram,seismogram_h,n_seis * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(mdl->seismogram,seismogram_h,n_seis * sizeof(float), cudaMemcpyHostToDevice);
     delete[] seismogram_h;
 }
 
@@ -251,9 +248,9 @@ void Migration::smoothModel(float* f, const bool* mask, const bool parameter){
     #pragma omp parallel for
     for(int i = 0; i < n; i++){
 
-        if(mask[i]){
-            s[i] = sOld[i];
-        }
+        // if(mask[i]){
+        //     s[i] = sOld[i];
+        // }
 
         if(parameter){
             f[i] = s[i];
@@ -264,17 +261,20 @@ void Migration::smoothModel(float* f, const bool* mask, const bool parameter){
     }
 }
 
-void Migration::backward_step(const double* P){
+void Migration::backward_step(float* P){
     if (pmt->approximation == "acoustic"){
-        updateAdjointWaveEquation<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, mdl->vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, mdl->A, pmt->N_abc);
+        updateAdjointWaveEquation<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, mdl->vp, pmt->nz_abc, pmt->nx_abc, pmt->dz, pmt->dx, pmt->dt, pmt->N_abc);
+        applyCerjan<<<expBlocks, nThreads, 0, mdl->compute_stream>>>(futurebck, currentbck, mdl->A, pmt->nx_abc, pmt->nz_abc, pmt->N_abc);
     }
     else if (pmt->approximation == "VTI"){
         calculateAdjointVTIProducts<<<expBlocks, nThreads,0,mdl->compute_stream>>>(currentbck, P, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta);
-        updateAdjointWaveEquationVTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc,pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
+        updateAdjointWaveEquationVTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc,pmt->dt, pmt->dx, pmt->dz, mdl->vp, pmt->N_abc);
+        applyCerjan<<<expBlocks, nThreads, 0, mdl->compute_stream>>>(futurebck, currentbck, mdl->A, pmt->nx_abc, pmt->nz_abc, pmt->N_abc);
     }
     else if (pmt->approximation == "TTI"){
         calculateAdjointTTIProducts<<<expBlocks, nThreads,0,mdl->compute_stream>>>(currentbck, P, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dx, pmt->dz, mdl->epsilon, mdl->delta, mdl->theta);
-        updateAdjointWaveEquationTTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, mdl->vp, mdl->A, pmt->N_abc);
+        updateAdjointWaveEquationTTI<<<expBlocks, nThreads,0,mdl->compute_stream>>>(futurebck, currentbck, P, image, ilum, AUc, BUc, HUc, QCxUc, QCzUc, pmt->nx_abc, pmt->nz_abc, pmt->dt, pmt->dx, pmt->dz, mdl->vp, pmt->N_abc);
+        applyCerjan<<<expBlocks, nThreads, 0, mdl->compute_stream>>>(futurebck, currentbck, mdl->A, pmt->nx_abc, pmt->nz_abc, pmt->N_abc);
     }
 }
 
@@ -344,21 +344,21 @@ void Migration::saveCheckpoint(const int k){
     std::ofstream file(checkpointFile,std::ios::binary);
     if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
 
-    file.write((char*)h_current,n_model_exp*sizeof(double));
-    file.write((char*)h_future,n_model_exp*sizeof(double));
+    file.write((char*)h_current,n_model_exp*sizeof(float));
+    file.write((char*)h_future,n_model_exp*sizeof(float));
     
     file.close();
 }
 
-void Migration::importCheckpoint(const int k, double* current, double* future){
+void Migration::importCheckpoint(const int k, float* current, float* future){
     const int n_model_exp = pmt->nx_abc*pmt->nz_abc;
     std::string checkpointFile = pmt->checkpointFolder+"checkpoint_Nx"+std::to_string(pmt->nx_abc)+"_Nz"+std::to_string(pmt->nz_abc)+"_frame"+std::to_string(k)+".bin";
 
     std::ifstream file(checkpointFile,std::ios::binary);
     if(!file.is_open()) throw std::invalid_argument("Info: Could not open checkpoint file.");
 
-    file.read((char*)current,n_model_exp*sizeof(double));
-    file.read((char*)future,n_model_exp*sizeof(double));
+    file.read((char*)current,n_model_exp*sizeof(float));
+    file.read((char*)future,n_model_exp*sizeof(float));
 
     file.close();
 }
@@ -402,7 +402,7 @@ void Migration::solveReverseTimeMigrationOntheFly(){
         for (int k = 0; k < pmt->nt; k++){
             mdl->forward_step();
             injectSource <<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz,pmt->dt);
-            cudaMemcpyAsync(savefield + k * n_model_exp,mdl->current,n_model_exp * sizeof(double),cudaMemcpyDeviceToDevice,mdl->compute_stream);
+            cudaMemcpyAsync(savefield + k * n_model_exp,mdl->current,n_model_exp * sizeof(float),cudaMemcpyDeviceToDevice,mdl->compute_stream);
             std::swap(mdl->current, mdl->future);
         }
         cudaStreamSynchronize(mdl->compute_stream);
@@ -424,89 +424,87 @@ void Migration::solveReverseTimeMigrationOntheFly(){
 }
 
 void Migration::solveReverseTimeMigrationCheckpoint(){
-    std::cout<<"info: Solving "+pmt->approximation+" Reverse Time Migration by "+pmt->migration+" method."<<std::endl;
-    
+    std::cout << "info: Solving " << pmt->approximation << " Reverse Time Migration by checkpoint method." << std::endl;
+
     initializeMigrationFields();
     mdl->createWavelet();
     mdl->createCerjanVector();
     setModel();
 
-    const int n_model_exp = pmt->nx_abc*pmt->nz_abc;
-    const int last_t = pmt->nt-1;
-    const int last_checkpoint = last_t - pmt->step;
-    for(int shot = 0; shot < pmt->Nshot; shot++){
-        std::cout<<"info: Shot "<<shot+1<<" of "<<pmt->Nshot<<std::endl;
+    const int n_model_exp = pmt->nx_abc * pmt->nz_abc;
+    const int last_window = ((pmt->nt - 1) / pmt->step) * pmt->step;
 
-        mdl->sx=pmt->sx[shot];
-        mdl->sz=pmt->sz[shot];
+    for (int shot = 0; shot < pmt->Nshot; ++shot){
+        std::cout << "info: Shot " << shot + 1 << " of " << pmt->Nshot << std::endl;
+        mdl->sx = pmt->sx[shot];
+        mdl->sz = pmt->sz[shot];
 
         resetFields();
         mdl->resetFields();
         loadSeismogram(shot);
+        cudaDeviceSynchronize();
 
-        for(int k = 0; k < pmt->nt; k++){
-            mdl->forward_step();
-            injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz,pmt->dx, pmt->dz,pmt->dt);
-            if((k <last_t) && ((last_t-k)%pmt->step==0)){
-                if(k >= pmt->step){
-                    cudaStreamSynchronize(mdl->copy_stream);
-                    saveCheckpoint(k - pmt->step);
-                }
-
+        std::future<void> ck_write;
+        for (int k = 0; k < pmt->nt; ++k){
+            if (k > 0 && k % pmt->step == 0){
+                if (ck_write.valid()) ck_write.get();
+                cudaMemcpyAsync(h_current, mdl->current, n_model_exp * sizeof(float), cudaMemcpyDeviceToHost, mdl->compute_stream);
+                cudaMemcpyAsync(h_future,  mdl->future,  n_model_exp * sizeof(float), cudaMemcpyDeviceToHost, mdl->compute_stream);
                 cudaStreamSynchronize(mdl->compute_stream);
-                cudaMemcpyAsync(d_current, mdl->current, n_model_exp*sizeof(double), cudaMemcpyDeviceToDevice, mdl->copy_stream);
-                cudaMemcpyAsync(d_future, mdl->future, n_model_exp*sizeof(double), cudaMemcpyDeviceToDevice, mdl->copy_stream);
-                cudaStreamSynchronize(mdl->copy_stream);
-                if(k != last_checkpoint){
-                cudaMemcpyAsync(h_current, d_current, n_model_exp*sizeof(double), cudaMemcpyDeviceToHost, mdl->copy_stream);
-                cudaMemcpyAsync(h_future, d_future, n_model_exp*sizeof(double), cudaMemcpyDeviceToHost, mdl->copy_stream);
-                }
+                ck_write = std::async(std::launch::async, [&, k](){ saveCheckpoint(k); });
             }
-            std::swap(mdl->current,mdl->future);
+            mdl->forward_step();
+            injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, k, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz, pmt->dx, pmt->dz, pmt->dt);
+            std::swap(mdl->current, mdl->future);
         }
+        if (ck_write.valid()) ck_write.get();
 
-        std::swap(mdl->current,mdl->future);
+        if (last_window > 0) importCheckpoint(last_window, h_current_next, h_future_next);
 
-        for(int window_start = last_t; window_start >= 0; window_start -= pmt->step){
-            const int window_end=std::max(0, window_start-pmt->step+1);
+        for (int t = last_window; t >= 0; t -= pmt->step){
+            const int count = std::min(pmt->step, pmt->nt - t);
+            const int previous = t - pmt->step;
 
-            if(window_start!=last_t){
+            if (t > 0){
+                cudaMemcpyAsync(mdl->current, h_current_next, n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->compute_stream);
+                cudaMemcpyAsync(mdl->future,  h_future_next,  n_model_exp * sizeof(float), cudaMemcpyHostToDevice, mdl->compute_stream);
+            } else {
+                cudaMemsetAsync(mdl->current, 0, n_model_exp * sizeof(float), mdl->compute_stream);
+                cudaMemsetAsync(mdl->future,  0, n_model_exp * sizeof(float), mdl->compute_stream);
+            }
             cudaStreamSynchronize(mdl->compute_stream);
-                cudaStreamSynchronize(mdl->copy_stream);
-                cudaMemcpyAsync(mdl->current, d_current, n_model_exp*sizeof(double), cudaMemcpyDeviceToDevice, mdl->copy_stream);
-                cudaMemcpyAsync(mdl->future, d_future, n_model_exp*sizeof(double), cudaMemcpyDeviceToDevice, mdl->copy_stream);
-                cudaStreamSynchronize(mdl->copy_stream);
-                }
 
-            for(int t = window_start; t >= window_end; t--){
-                removeSource<<<1,1,0,mdl->compute_stream>>>(mdl->future, mdl->source, t, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz, pmt->dx, pmt->dz, pmt->dt);
+            std::future<void> disk_read;
+            if (previous > 0){
+                disk_read = std::async(std::launch::async, [&, previous](){
+                    importCheckpoint(previous, h_current_next, h_future_next);
+                });
+            }
+
+            for (int i = 0; i < count; ++i){
                 mdl->forward_step();
-                backward_step(mdl->current);
-                if(t >= pmt->itlag){
-                    const int it=t-pmt->itlag;
-                    injectAdjointSource<<<seisBlocks,nThreads,0,mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, it, pmt->Nrec, pmt->nx_abc, pmt->dt, mdl->vp);
-                }
-                
-                
-                std::swap(mdl->current,mdl->future);
-                std::swap(currentbck,futurebck);
+                injectSource<<<1, 1, 0, mdl->compute_stream>>>(mdl->future, mdl->source, t + i, pmt->nt, pmt->nx_abc, mdl->sx, mdl->sz, pmt->dx, pmt->dz, pmt->dt);
+                cudaMemcpyAsync(savefield + i * n_model_exp, mdl->current, n_model_exp * sizeof(float), cudaMemcpyDeviceToDevice, mdl->compute_stream);
+                std::swap(mdl->current, mdl->future);
             }
 
-            const int next_checkpoint = window_start-pmt->step;
-            if((next_checkpoint >= 0) && (window_start!=last_t)){
-                importCheckpoint(next_checkpoint, h_current_next, h_future_next);
-                cudaMemcpyAsync(d_current, h_current_next, n_model_exp*sizeof(double), cudaMemcpyHostToDevice, mdl->copy_stream);
-                cudaMemcpyAsync(d_future, h_future_next, n_model_exp*sizeof(double), cudaMemcpyHostToDevice, mdl->copy_stream);
+            for (int i = count - 1; i >= 0; --i){
+                backward_step(savefield + i * n_model_exp);
+                if (t + i >= pmt->itlag){
+                    injectAdjointSource<<<seisBlocks, nThreads, 0, mdl->compute_stream>>>(futurebck, mdl->seismogram, mdl->rx, mdl->rz, t + i - pmt->itlag, pmt->Nrec, pmt->nx_abc, pmt->dt, mdl->vp);
+                }
+                std::swap(currentbck, futurebck);
             }
+
+            if (previous > 0) disk_read.get();
         }
         cudaStreamSynchronize(mdl->compute_stream);
-        cudaStreamSynchronize(mdl->copy_stream);
     }
 
-    normalizeImage<<<nBlocks,nThreads,0,mdl->compute_stream>>>(image, ilum, pmt->nx, pmt->nz);
+    normalizeImage<<<nBlocks, nThreads, 0, mdl->compute_stream>>>(image, ilum, pmt->nx, pmt->nz);
     cudaStreamSynchronize(mdl->compute_stream);
     saveImage();
-    std::cout<<"info: Reverse Time Migration"<<std::endl;
+    std::cout << "info: Reverse Time Migration" << std::endl;
 }
 
 __global__ void normalizeImage(float* __restrict__ image, const float* __restrict__ ilum, int nx, int nz){
@@ -518,15 +516,7 @@ __global__ void normalizeImage(float* __restrict__ image, const float* __restric
     }       
 }
 
-__global__ void removeSource(double* __restrict__ future, const float* __restrict__ source, int k, const int nt, const int nx_abc, const int sx, const int sz, float dx, float dz, float dt){
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    double inv_dxdz = 1.0 / (double(dx) * double(dz));
-    if ((index == 0) && (k < nt)){
-        future[sz * nx_abc + sx] -= double(source[k])*inv_dxdz*double(dt)*double(dt);
-    }
-}
-
-__global__ void injectAdjointSource(float* __restrict__ futurebck, const double* __restrict__ seismogram, const int* rx, const int* rz, int t, int Nrec, int nx_abc, float dt, const float* __restrict__ vp){
+__global__ void injectAdjointSource(float* __restrict__ futurebck, const float* __restrict__ seismogram, const int* rx, const int* rz, int t, int Nrec, int nx_abc, float dt, const float* __restrict__ vp){
     int irec = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (irec >= Nrec){
@@ -536,7 +526,7 @@ __global__ void injectAdjointSource(float* __restrict__ futurebck, const double*
     futurebck[rz[irec] * nx_abc + rx[irec]] += seismogram[t * Nrec + irec] * vp2 * dt * dt;
 }
 
-__global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc, const double* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, float* __restrict__ A, int N_abc){
+__global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restrict__ Uc, float* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ vp,const int nz,const int nx,const float dz,const float dx,const float dt, int N_abc){
     const float c0 = -2.847222222222f;
     const float c1 =  1.6f;
     const float c2 = -0.2f;
@@ -585,29 +575,10 @@ __global__ void updateAdjointWaveEquation(float* __restrict__ Uf, float* __restr
             ilum[idx] += P[i] * P[i];
             image[idx] += Uc[i] * P[i];
         }
-        
-        if (ix < N_abc){
-            Uf[i] *= double(A[ix]);
-            Uc[i] *= double(A[ix]);
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= double(A[nx - 1 - ix]);
-            Uc[i] *= double(A[nx - 1 - ix]);
-        }
-        if (iz < N_abc){
-            Uf[i] *= double(A[iz]);
-            Uc[i] *= double(A[iz]);
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= double(A[nz - 1 - iz]);
-            Uc[i] *= double(A[nz - 1 - iz]);
-        }
-    }  
-
+    }
 }
 
-__global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc, const double* __restrict__ P, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc, const int nx, const int nz, const float dx, const float dz, const float* __restrict__ epsilon, const float* __restrict__ delta)
-{
+__global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc, const float* __restrict__ P, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc, const int nx, const int nz, const float dx, const float dz, const float* __restrict__ epsilon, const float* __restrict__ delta){
     const float c0 = -1435.0f / 504.0f;
     const float c1 =  8.0f / 5.0f;
     const float c2 = -1.0f / 5.0f;
@@ -633,68 +604,80 @@ __global__ void calculateAdjointVTIProducts(const float* __restrict__ Uc, const 
     const int iz = i / nx;
     const int ix = i % nx;
 
-    AUc[i]   = 0.0f;
-    BUc[i]   = 0.0f;
+    AUc[i] = 0.0f;
+    BUc[i] = 0.0f;
     QCxUc[i] = 0.0f;
     QCzUc[i] = 0.0f;
 
-    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4){
-        const float pxx =(c0 * P[i]
+    if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
+    {
+        const float pxx = (c0 * P[i]
                 + c1 * (P[i + 1] + P[i - 1])
                 + c2 * (P[i + 2] + P[i - 2])
                 + c3 * (P[i + 3] + P[i - 3])
                 + c4 * (P[i + 4] + P[i - 4])) * inv_dx2;
 
-        const float pzz =(c0 * P[i]
+        const float pzz = (c0 * P[i]
                 + c1 * (P[i + nx] + P[i - nx])
                 + c2 * (P[i + 2 * nx] + P[i - 2 * nx])
                 + c3 * (P[i + 3 * nx] + P[i - 3 * nx])
                 + c4 * (P[i + 4 * nx] + P[i - 4 * nx])) * inv_dz2;
 
-        const float px =(a1 * (P[i + 1] - P[i - 1])
+        const float px = (a1 * (P[i + 1] - P[i - 1])
                 + a2 * (P[i + 2] - P[i - 2])
                 + a3 * (P[i + 3] - P[i - 3])
                 + a4 * (P[i + 4] - P[i - 4])) * inv_dx;
 
-        const float pz =(a1 * (P[i + nx] - P[i - nx])
-                + a2 * (P[i + 2*nx] - P[i - 2*nx])
-                + a3 * (P[i + 3*nx] - P[i - 3*nx])
-                + a4 * (P[i + 4*nx] - P[i - 4*nx])) * inv_dz;
+        const float pz = (a1 * (P[i + nx] - P[i - nx])
+                + a2 * (P[i + 2 * nx] - P[i - 2 * nx])
+                + a3 * (P[i + 3 * nx] - P[i - 3 * nx])
+                + a4 * (P[i + 4 * nx] - P[i - 4 * nx])) * inv_dz;
 
-        const float eps  = epsilon[i];
+        const float eps = epsilon[i];
         const float del = delta[i];
 
-        const float px2 = px * px;
-        const float pz2 = pz * pz;
+        const float eta = 1.0e-10f;
 
-        const float px4 = px2 * px2;
-        const float pz4 = pz2 * pz2;
+        const float sd_scale = fmax(fmax(fabs(px), fabs(pz)),eta);
 
-        const float num = -2.0f * (eps - del) * px2 * pz2;
-        const float den = (1.0f + 2.0f * eps) * px4 + pz4 + 2.0f * (1.0f + del) * px2 * pz2;
-        const float den_reg = den + 1e-37f;
-        const float inv_den = 1.0f / den_reg;
-        const float Sd = num * inv_den;
+        const float gx_scaled = px / sd_scale;
+        const float gz_scaled = pz / sd_scale;
+        const float eta_scaled = eta / sd_scale;
 
-        const float dnum_dpx = -4.0f * (eps - del) * px * pz2;
-        const float dnum_dpz = -4.0f * (eps - del) * px2 * pz;
-        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * px * px2 + 4.0f * (1.0f + del) * px * pz2;
-        const float dden_dpz = 4.0f * pz * pz2 + 4.0f * (1.0f + del) * px2 * pz;
-        const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
-        const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
+        const float gx2 = gx_scaled * gx_scaled;
+        const float gz2 = gz_scaled * gz_scaled;
+        const float gx4 = gx2 * gx2;
+        const float gz4 = gz2 * gz2;
+        const float gx2gz2 = gx2 * gz2;
+
+        const float eta2 = eta_scaled * eta_scaled;
+        const float eta4 = eta2 * eta2;
+
+        const float den = (1.0 + 2.0 * eps) * gx4 + gz4 + 2.0 * (1.0 + del) * gx2gz2 + eta4;
+        const float num = -2.0 * (eps - del) * gx2gz2;
+
+        const float sd_value = num / den;
+        const float num_gx = -4.0 * (eps - del) * gx_scaled * gz2;
+        const float num_gz = -4.0 * (eps - del) * gx2 * gz_scaled;
+        const float den_gx = 4.0 * (1.0 + 2.0 * eps) * gx_scaled * gx2 + 4.0 * (1.0 + del) * gx_scaled * gz2;
+        const float den_gz = 4.0 * gz_scaled * gz2 + 4.0 * (1.0 + del) * gx2 * gz_scaled;
+        const float sd_gx = (num_gx - sd_value * den_gx) / (den * sd_scale);
+        const float sd_gz = (num_gz - sd_value * den_gz) / (den * sd_scale);
+        const float Sd = sd_value;
 
         const float A = 1.0f + 2.0f * eps + Sd;
         const float B = 1.0f + Sd;
         const float Q = pxx + pzz;
 
-        AUc[i]   = A * Uc[i];
-        BUc[i]   = B * Uc[i];
-        QCxUc[i] = Q * Cx * Uc[i];
-        QCzUc[i] = Q * Cz * Uc[i];
+        AUc[i] = A * Uc[i];
+        BUc[i] = B * Uc[i];
+        QCxUc[i] = Q * sd_gx * Uc[i];
+        QCzUc[i] = Q * sd_gz * Uc[i];
     }
 }
 
-__global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc, const double* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp, float* __restrict__ A, int N_abc)
+
+__global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf, float* __restrict__ Uc, float* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc,const int nx,const int nz,const float dt,const float dx,const float dz,const float* __restrict__ vp, int N_abc)
 {
     const float c0 = -1435.0f / 504.0f;
     const float c1 =  8.0f / 5.0f;
@@ -720,7 +703,6 @@ __global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf, float* __re
 
     const int iz = i / nx;
     const int ix = i % nx;
-
 
     if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
     {
@@ -763,28 +745,10 @@ __global__ void updateAdjointWaveEquationVTI(float* __restrict__ Uf, float* __re
             ilum[idx] += P[i] * P[i];
             image[idx] += Uc[i] * P[i];
         }
-
-        if (ix < N_abc){
-            Uf[i] *= double(A[ix]);
-            Uc[i] *= double(A[ix]);
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= double(A[nx - 1 - ix]);
-            Uc[i] *= double(A[nx - 1 - ix]);
-        }
-        if (iz < N_abc){
-            Uf[i] *= double(A[iz]);
-            Uc[i] *= double(A[iz]);
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= double(A[nz - 1 - iz]);
-            Uc[i] *= double(A[nz - 1 - iz]);
-        }
     }
-
 }
 
-__global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const double* __restrict__ P, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ HUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc, const int nx, const int nz, const float dx, const float dz, const float* __restrict__ epsilon, const float* __restrict__ delta, const float* __restrict__ theta)
+__global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const float* __restrict__ P, float* __restrict__ AUc, float* __restrict__ BUc, float* __restrict__ HUc, float* __restrict__ QCxUc, float* __restrict__ QCzUc, const int nx, const int nz, const float dx, const float dz, const float* __restrict__ epsilon, const float* __restrict__ delta, const float* __restrict__ theta)
 {
     const float c0 = -1435.0f / 504.0f;
     const float c1 =  8.0f / 5.0f;
@@ -803,7 +767,6 @@ __global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const 
     const float inv_dz2 = 1.0f / (dz * dz);
 
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
-
     const int total_size = nx * nz;
 
     if (i >= total_size)
@@ -812,82 +775,99 @@ __global__ void calculateAdjointTTIProducts(const float* __restrict__ Uc, const 
     const int iz = i / nx;
     const int ix = i % nx;
 
-    AUc[i]   = 0.0f;
-    BUc[i]   = 0.0f;
-    HUc[i]   = 0.0f;
+    AUc[i] = 0.0f;
+    BUc[i] = 0.0f;
+    HUc[i] = 0.0f;
     QCxUc[i] = 0.0f;
     QCzUc[i] = 0.0f;
 
     if (ix >= 4 && ix < nx - 4 && iz >= 4 && iz < nz - 4)
     {
-        const float pxx =(c0 * P[i]
+        const float pxx = (c0 * P[i]
                 + c1 * (P[i + 1] + P[i - 1])
                 + c2 * (P[i + 2] + P[i - 2])
                 + c3 * (P[i + 3] + P[i - 3])
                 + c4 * (P[i + 4] + P[i - 4])) * inv_dx2;
 
-        const float pzz =(c0 * P[i]
+        const float pzz = (c0 * P[i]
                 + c1 * (P[i + nx] + P[i - nx])
                 + c2 * (P[i + 2 * nx] + P[i - 2 * nx])
                 + c3 * (P[i + 3 * nx] + P[i - 3 * nx])
                 + c4 * (P[i + 4 * nx] + P[i - 4 * nx])) * inv_dz2;
 
-        const float px =(a1 * (P[i + 1] - P[i - 1])
+        const float px = (a1 * (P[i + 1] - P[i - 1])
                 + a2 * (P[i + 2] - P[i - 2])
                 + a3 * (P[i + 3] - P[i - 3])
                 + a4 * (P[i + 4] - P[i - 4])) * inv_dx;
 
-        const float pz =(a1 * (P[i + nx] - P[i - nx])
-                + a2 * (P[i + 2*nx] - P[i - 2*nx])
-                + a3 * (P[i + 3*nx] - P[i - 3*nx])
-                + a4 * (P[i + 4*nx] - P[i - 4*nx])) * inv_dz;
+        const float pz = (a1 * (P[i + nx] - P[i - nx])
+                + a2 * (P[i + 2 * nx] - P[i - 2 * nx])
+                + a3 * (P[i + 3 * nx] - P[i - 3 * nx])
+                + a4 * (P[i + 4 * nx] - P[i - 4 * nx])) * inv_dz;
 
-        const float eps  = epsilon[i];
+        const float eps = epsilon[i];
         const float del = delta[i];
+
         const float c = cosf(theta[i]);
         const float s = sinf(theta[i]);
 
-        const float xi = px * c - pz * s;
-        const float eta = px * s + pz * c;
+        const float px_rot = px * c - pz * s;
+        const float pz_rot = px * s + pz * c;
 
-        const float xi2  = xi * xi;
-        const float eta2 = eta * eta;
+        const float eta = 1.0e-10f;
 
-        const float xi4  = xi2 * xi2;
+        const float sd_scale = fmax(fmax(fabs(px_rot), fabs(pz_rot)), eta);
+
+        const float gx_scaled = px_rot / sd_scale;
+        const float gz_scaled = pz_rot / sd_scale;
+        const float eta_scaled = eta / sd_scale;
+
+        const float gx2 = gx_scaled * gx_scaled;
+        const float gz2 = gz_scaled * gz_scaled;
+        const float gx4 = gx2 * gx2;
+        const float gz4 = gz2 * gz2;
+        const float gx2gz2 = gx2 * gz2;
+
+        const float eta2 = eta_scaled * eta_scaled;
         const float eta4 = eta2 * eta2;
 
-        const float num = -2.0f * (eps - del) * xi2* eta2;
-        const float den = (1.0f + 2.0f * eps) * xi4 + eta4 + 2.0f * (1.0f + del) * xi2 * eta2;
+        const float den = (1.0f + 2.0f * eps) * gx4 + gz4 + 2.0f * (1.0f + del) * gx2gz2 + eta4;
+        const float num = -2.0f * (eps - del) * gx2gz2;
 
-        const float den_reg = den + 1e-37f;
-        const float inv_den = 1.0f / den_reg;
-        const float Sd = num * inv_den;
+        const float sd_value = num / den;
 
-        const float dnum_dpx = -4.0f * (eps - del) * (xi * eta2 * c + xi2 * eta * s);
-        const float dnum_dpz = -4.0f * (eps - del) * (xi * eta2 * (-s) + xi2 * eta * c);
-        const float dden_dpx = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * c + 4.0f * eta2 * eta * s + 4.0f * (1.0f + del) * (xi * eta2 * c + xi2 * eta * s);
-        const float dden_dpz = 4.0f * (1.0f + 2.0f * eps) * xi * xi2 * (-s) + 4.0f * eta * eta2 * c + 4.0f * (1.0f + del) * (xi * eta2 * (-s) + xi2 * eta * c);
-        const float Cx = (dnum_dpx - Sd * dden_dpx) * inv_den;
-        const float Cz = (dnum_dpz - Sd * dden_dpz) * inv_den;
+        const float num_gx = -4.0f * (eps - del) * gx_scaled * gz2;
+        const float num_gz = -4.0f * (eps - del) * gx2 * gz_scaled;
+
+        const float den_gx = 4.0f * (1.0f + 2.0f * eps) * gx_scaled * gx2 + 4.0f * (1.0f + del) * gx_scaled * gz2;
+        const float den_gz = 4.0f * gz_scaled * gz2 + 4.0f * (1.0f + del) * gx2 * gz_scaled;
+
+        const float sd_xi = (num_gx - sd_value * den_gx) / (den * sd_scale);
+        const float sd_zeta = (num_gz - sd_value * den_gz) / (den * sd_scale);
+
+        const float sd_gx = c * sd_xi + s * sd_zeta;
+        const float sd_gz = c * sd_zeta - s * sd_xi;
+
+        const float Sd = sd_value;
 
         const float cos2 = c * c;
         const float sin2 = s * s;
-        const float sin2th = 2.0f*s*c;
+        const float sin2th = 2.0f * s * c;
 
         const float A = (1.0f + 2.0f * eps) * cos2 + sin2 + Sd;
         const float B = (1.0f + 2.0f * eps) * sin2 + cos2 + Sd;
         const float H = 2.0f * eps * sin2th;
         const float Q = pxx + pzz;
-        
-        AUc[i]   = A * Uc[i];
-        BUc[i]   = B * Uc[i];
-        HUc[i]   = H * Uc[i];
-        QCxUc[i] = Q * Cx * Uc[i];
-        QCzUc[i] = Q * Cz * Uc[i];
-    }
-}    
 
-__global__ void updateAdjointWaveEquationTTI(float* __restrict__ Uf, float* __restrict__ Uc, const double* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ AUc, const float* __restrict__ BUc, const float* __restrict__ HUc, const float* __restrict__ QCxUc, const float* __restrict__ QCzUc, const int nx, const int nz, const float dt, const float dx, const float dz, const float* __restrict__ vp, float* __restrict__ A, int N_abc)
+        AUc[i] = A * Uc[i];
+        BUc[i] = B * Uc[i];
+        HUc[i] = H * Uc[i];
+        QCxUc[i] = Q * sd_gx * Uc[i];
+        QCzUc[i] = Q * sd_gz * Uc[i];
+    }
+}  
+
+__global__ void updateAdjointWaveEquationTTI(float* __restrict__ Uf, float* __restrict__ Uc, float* __restrict__ P, float* __restrict__ image, float* __restrict__ ilum, const float* __restrict__ AUc, const float* __restrict__ BUc, const float* __restrict__ HUc, const float* __restrict__ QCxUc, const float* __restrict__ QCzUc, const int nx, const int nz, const float dt, const float dx, const float dz, const float* __restrict__ vp, int N_abc)
 {
     const float c0 = -1435.0f / 504.0f;
     const float c1 =  8.0f / 5.0f;
@@ -979,23 +959,5 @@ __global__ void updateAdjointWaveEquationTTI(float* __restrict__ Uf, float* __re
             ilum[idx] += P[i] * P[i];
             image[idx] += Uc[i] * P[i];
         }
-
-        if (ix < N_abc){
-            Uf[i] *= double(A[ix]);
-            Uc[i] *= double(A[ix]);
-        }
-        if (ix >=  nx - N_abc){
-            Uf[i] *= double(A[nx - 1 - ix]);
-            Uc[i] *= double(A[nx - 1 - ix]);
-        }
-        if (iz < N_abc){
-            Uf[i] *= double(A[iz]);
-            Uc[i] *= double(A[iz]);
-        }
-        if (iz >= nz - N_abc){
-            Uf[i] *= double(A[nz - 1 - iz]);
-            Uc[i] *= double(A[nz - 1 - iz]);
-        }
     }
-    
 }
